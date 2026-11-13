@@ -1,0 +1,17 @@
+{
+  "harness": "cline",
+  "mcp_schema": "mcpServers",
+  "mcp_format": "json",
+  "http_transport_style": "type_streamableHttp",
+  "env_syntax": "${VAR}",
+  "supports_sse": true,
+  "rules_target": "~/.agents/AGENTS.md",
+  "home_env_var": "CLINE_DIR",
+  "failsafe_flags": [
+    "--auto-approve",
+    "false"
+  ],
+  "base_settings": {},
+  "managed_keys": [],
+  "removed_keys": []
+}

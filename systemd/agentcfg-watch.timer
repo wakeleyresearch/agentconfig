@@ -1,0 +1,11 @@
+[Unit]
+Description=Run agentconfig local update-drift monitor every 6 hours
+
+[Timer]
+OnBootSec=5m
+OnUnitActiveSec=6h
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

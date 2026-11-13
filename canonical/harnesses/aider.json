@@ -1,0 +1,27 @@
+{
+  "harness": "aider",
+  "mcp_schema": "none",
+  "mcp_format": "none",
+  "http_transport_style": "none",
+  "env_syntax": "none",
+  "supports_sse": false,
+  "rules_target": "~/.aider.conf.yml",
+  "home_env_var": "HOME",
+  "failsafe_flags": [
+    "--no-check-update",
+    "--no-restore-chat-history"
+  ],
+  "base_settings": {
+    "check-update": false,
+    "restore-chat-history": false,
+    "read": [
+      "~/.agents/AGENTS.md"
+    ]
+  },
+  "managed_keys": [
+    "check-update",
+    "restore-chat-history",
+    "read"
+  ],
+  "removed_keys": []
+}

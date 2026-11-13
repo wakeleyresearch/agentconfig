@@ -1,0 +1,25 @@
+{
+  "harness": "goose",
+  "mcp_schema": "extensions",
+  "mcp_format": "yaml",
+  "http_transport_style": "type_streamable_http_uri",
+  "env_syntax": "env_key_only",
+  "supports_sse": false,
+  "rules_target": "~/.agents/AGENTS.md",
+  "home_env_var": "GOOSE_PATH_ROOT",
+  "failsafe_flags": [
+    "run",
+    "--no-session"
+  ],
+  "base_settings": {
+    "extensions": {
+      "memory": {
+        "enabled": false
+      }
+    }
+  },
+  "managed_keys": [
+    "extensions"
+  ],
+  "removed_keys": []
+}

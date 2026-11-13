@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+# Collect staged files (Added, Copied, Modified, Renamed).
+mapfile -d '' -t STAGED_FILES < <(git diff --cached --name-only -z --diff-filter=ACMR)
+if [ "${#STAGED_FILES[@]}" -eq 0 ]; then
+  exit 0
+fi
+
+# 1. Run agentcfg validate --staged once bin/agentcfg exists.
+if [ -f "$REPO_ROOT/bin/agentcfg" ]; then
+  python3 "$REPO_ROOT/bin/agentcfg" validate --staged
+fi
+
+# 2. Run gitleaks protect --staged if installed.
+GITLEAKS_BIN=""
+if command -v gitleaks >/dev/null 2>&1; then
+  GITLEAKS_BIN="$(command -v gitleaks)"
+elif [ -x "$HOME/.local/bin/gitleaks" ]; then
+  GITLEAKS_BIN="$HOME/.local/bin/gitleaks"
+fi
+
+if [ -n "$GITLEAKS_BIN" ]; then
+  "$GITLEAKS_BIN" protect --staged --no-banner --redact
+fi
+
+# 3. Built-in Python staged guard (works immediately before bin/agentcfg exists
+#    and acts as defense-in-depth for filenames, secrets, Unicode, and MCP rules).
+python3 - <<'PY'
+import json
+import math
+import os
+import re
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+raw = subprocess.check_output(
+    ["git", "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"]
+)
+paths = [p.decode("utf-8", errors="surrogateescape") for p in raw.split(b"\0") if p]
+if not paths:
+    sys.exit(0)
+
+FORBIDDEN_BASENAMES = {
+    "antigravity-oauth-token",
+    "auth.json",
+    "oauth_creds.json",
+    ".credentials.json",
+    "hosts.yml",
+    "history.jsonl",
+    "mcp_credentials.json",
+    "google_accounts.json",
+    "keys.txt",
+    "agentconfig_signing",
+    "id_ed25519",
+    "id_rsa",
+    "id_ecdsa",
+    ".env",
+}
+FORBIDDEN_SUFFIXES = (".dec", ".key", ".pem", ".p12", ".pfx")
+
+# Split marker literals so self-scanning this hook never false-positives.
+AGE_PRIV_RE = re.compile("AGE-SECRET-" + r"KEY-1[0-9A-Z]{58}")
+PEM_PRIV_RE = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE " + r"KEY-----")
+
+SECRET_PATTERNS = [
+    ("age private key", AGE_PRIV_RE),
+    ("PEM private key", PEM_PRIV_RE),
+    ("GitHub classic PAT", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b")),
+    ("GitHub fine-grained PAT", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b")),
+    ("OpenAI/Anthropic key", re.compile(r"\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}\b")),
+    ("Google API key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b")),
+    ("AWS access key ID", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("Slack token", re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b")),
+    ("Literal Bearer token", re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{20,}")),
+]
+
+HIGH_RISK_CONFIG_KEYS = re.compile(
+    r'(?i)"?(?:api[_-]?key|secret|token|password|access[_-]?token|refresh[_-]?token|private[_-]?key|authorization)"?\s*[:=]\s*["\']([^"\']{16,})["\']'
+)
+
+BANNED_RUNNER_PATTERNS = [
+    ("banned floating npx -y", re.compile(r"\bnpx\s+(?:-y|--yes)\b")),
+    ("banned floating npx -y list", re.compile(r'["\']npx["\']\s*,\s*["\'](?:-y|--yes)["\']')),
+    ("banned floating uvx", re.compile(r"\buvx\b")),
+    ("banned @latest specifier", re.compile(r"@latest\b")),
+]
+
+
+def walk_config_values(obj, rel: str, errors: list[str]) -> None:
+    if isinstance(obj, dict):
+        cmd = obj.get("command")
+        args = obj.get("args")
+        if isinstance(cmd, str):
+            cmd_base = Path(cmd.split()[0]).name if cmd.strip() else ""
+            if cmd_base == "uvx" or re.search(r"\buvx\b", cmd):
+                errors.append(f"{rel}: banned floating runner 'uvx' in command")
+            if cmd_base == "npx":
+                arg_list = [str(a) for a in args] if isinstance(args, list) else []
+                if "-y" in arg_list or "--yes" in arg_list or re.search(r"(?:^|\s)(?:-y|--yes)(?:\s|$)", cmd):
+                    errors.append(f"{rel}: banned floating 'npx -y/--yes' in command/args")
+        elif isinstance(cmd, list) and cmd:
+            first = str(cmd[0])
+            cmd_base = Path(first).name if first.strip() else ""
+            rest = [str(x) for x in cmd[1:]]
+            if cmd_base == "uvx":
+                errors.append(f"{rel}: banned floating runner 'uvx' in command list")
+            if cmd_base == "npx" and ("-y" in rest or "--yes" in rest):
+                errors.append(f"{rel}: banned floating 'npx -y/--yes' in command list")
+        for v in obj.values():
+            walk_config_values(v, rel, errors)
+    elif isinstance(obj, list):
+        for item in obj:
+            walk_config_values(item, rel, errors)
+
+HTTP_URL_RE = re.compile(r"http://([^\s\"'`,)>]+)", re.IGNORECASE)
+LOCAL_HTTP_HOSTS = ("127.0.0.1", "localhost", "[::1]", "json-schema.org", "schemas.openxmlformats.org")
+
+def is_invisible_char(ch: str) -> bool:
+    cp = ord(ch)
+    return (
+        cp == 0xFEFF
+        or 0x200B <= cp <= 0x200F
+        or 0x202A <= cp <= 0x202E
+        or 0x2060 <= cp <= 0x2064
+        or 0xE0000 <= cp <= 0xE007F
+    )
+
+def shannon_entropy(s: str) -> float:
+    if not s:
+        return 0.0
+    freq = {}
+    for ch in s:
+        freq[ch] = freq.get(ch, 0) + 1
+    n = len(s)
+    return -sum((c / n) * math.log2(c / n) for c in freq.values())
+
+def is_placeholder(val: str) -> bool:
+    v = val.strip()
+    if v.startswith(("${", "{env:", "$")):
+        return True
+    if v.startswith("ENC["):
+        return True
+    if v.upper() in {"CHANGE_ME", "REDACTED", "PLACEHOLDER", "REPLACE_ME"}:
+        return True
+    if "example" in v.lower() or "dummy" in v.lower():
+        return True
+    return False
+
+def read_staged_blob(relpath: str) -> bytes:
+    return subprocess.check_output(["git", "show", f":{relpath}"])
+
+errors = []
+
+for rel in paths:
+    p = Path(rel)
+    name = p.name
+    lower_name = name.lower()
+
+    if lower_name in FORBIDDEN_BASENAMES or (
+        lower_name.startswith(".env.") and lower_name != ".env.example"
+    ):
+        errors.append(f"{rel}: forbidden sensitive/runtime filename")
+        continue
+
+    if any(lower_name.endswith(sfx) for sfx in FORBIDDEN_SUFFIXES) or ".dec." in lower_name:
+        errors.append(f"{rel}: forbidden decrypted/key file extension")
+        continue
+
+    data = read_staged_blob(rel)
+    if b"\x00" in data:
+        # Skip binary assets unless inside secrets/
+        if rel.startswith("secrets/"):
+            errors.append(f"{rel}: binary blob not permitted under secrets/")
+        continue
+
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        errors.append(f"{rel}: non-UTF-8 text file")
+        continue
+
+    # Enforce SOPS encryption rules under secrets/
+    if rel.startswith("secrets/") and rel not in {"secrets/.sops.yaml", "secrets/README.md"}:
+        if not (".enc." in lower_name and "ENC[AES256_GCM," in text and "\nsops:" in ("\n" + text)):
+            errors.append(f"{rel}: files under secrets/ must be SOPS-encrypted (*.enc.*)")
+        if AGE_PRIV_RE.search(text):
+            errors.append(f"{rel}: age secret key material must NEVER be committed")
+        continue
+
+    # Check invisible Unicode across all staged text files
+    for idx, line in enumerate(text.splitlines(), 1):
+        bad_chars = [f"U+{ord(c):04X}" for c in line if is_invisible_char(c)]
+        if bad_chars:
+            errors.append(f"{rel}:{idx}: invisible/bidi/tag Unicode detected ({', '.join(bad_chars[:4])})")
+            break
+
+    # Skip regex policy definitions / hook / docs / schema snapshots for token/MCP string checks
+    is_policy_def_or_doc = (
+        rel in {".githooks/pre-commit", "policy/security-policy.json", "README.md"}
+        or rel.startswith("docs/")
+        or rel.startswith("policy/upstream-schemas/")
+    )
+
+    for label, rx in SECRET_PATTERNS:
+        if rel == ".githooks/pre-commit":
+            continue
+        if rel.startswith("tests/") and label not in {"age private key", "PEM private key"}:
+            continue
+        for idx, line in enumerate(text.splitlines(), 1):
+            if "ENC[AES256_GCM," in line or "gitleaks:allow" in line:
+                continue
+            if rx.search(line):
+                errors.append(f"{rel}:{idx}: potential {label} detected")
+                break
+
+    if not is_policy_def_or_doc and not rel.startswith("tests/"):
+        for idx, line in enumerate(text.splitlines(), 1):
+            if "ENC[AES256_GCM," in line:
+                continue
+            m = HIGH_RISK_CONFIG_KEYS.search(line)
+            if m:
+                val = m.group(1)
+                if not is_placeholder(val) and shannon_entropy(val) >= 3.3:
+                    errors.append(f"{rel}:{idx}: high-entropy literal credential value detected")
+                    break
+
+    # Validate JSON/TOML syntax & banned MCP/transport patterns for declarative config targets
+    is_config_target = (
+        rel.startswith(("canonical/", "targets/"))
+        or name in {".mcp.json", "mcp_config.json", "mcp-config.json", "mcp.json", "cline_mcp_settings.json"}
+    )
+    if is_config_target:
+        if lower_name.endswith(".json"):
+            try:
+                parsed = json.loads(text)
+                walk_config_values(parsed, rel, errors)
+            except json.JSONDecodeError as exc:
+                errors.append(f"{rel}: invalid JSON: {exc}")
+        elif lower_name.endswith(".toml"):
+            try:
+                parsed = tomllib.loads(text)
+                walk_config_values(parsed, rel, errors)
+            except tomllib.TOMLDecodeError as exc:
+                errors.append(f"{rel}: invalid TOML: {exc}")
+
+        for label, rx in BANNED_RUNNER_PATTERNS:
+            for idx, line in enumerate(text.splitlines(), 1):
+                if rx.search(line):
+                    errors.append(f"{rel}:{idx}: {label}")
+                    break
+
+        for idx, line in enumerate(text.splitlines(), 1):
+            for um in HTTP_URL_RE.finditer(line):
+                host = um.group(1).split("/", 1)[0].lower()
+                if not any(host.startswith(ok) for ok in LOCAL_HTTP_HOSTS):
+                    errors.append(f"{rel}:{idx}: unencrypted remote http:// URL banned in config ({host})")
+                    break
+
+if errors:
+    sys.stderr.write("[pre-commit] BLOCKED commit due to security/policy violations:\n")
+    for err in errors:
+        sys.stderr.write(f"  - {err}\n")
+    sys.exit(1)
+PY

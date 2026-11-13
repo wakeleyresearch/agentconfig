@@ -1,0 +1,49 @@
+# Decrypted / private key artifacts (NEVER commit plaintext secrets)
+*.dec.*
+*.dec
+.age/
+*.age
+keys.txt
+*.key
+*.pem
+*.p12
+*.pfx
+.env
+.env.*
+!.env.example
+
+# Native harness auth / credential / history / memory runtime files
+auth.json
+oauth_creds.json
+.credentials.json
+antigravity-oauth-token
+hosts.yml
+history.jsonl
+mcp_credentials.json
+google_accounts.json
+
+# Runtime state, backups, build & temp artifacts
+dist/
+state/
+backups/
+*.tmp
+*.bak
+*.orig
+*.swp
+*.log
+*.bundle
+*.tar.gz
+*.db*
+*.sqlite*
+
+# Python caches & virtual environments
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# NOTE: Never list `.agents/` in .gitignore; Antigravity 2.0 skips .agents/
+# rules/skills if present in .gitignore. Generated workspace `.agents/` paths
+# are excluded via `.git/info/exclude` instead.

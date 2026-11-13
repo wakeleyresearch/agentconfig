@@ -1,0 +1,235 @@
+{
+  "schema_version": "1.0",
+  "rules_budgets": {
+    "antigravity_max_bytes": 24000,
+    "antigravity_default_rules_tokens": 20000,
+    "kimi_warn_bytes": 32768,
+    "codex_skill_warn_bytes": 8192,
+    "failsafe_max_bytes": 2048
+  },
+  "skills": {
+    "name_regex": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$",
+    "name_max_length": 64,
+    "description_max_length": 1024,
+    "require_name_matches_dir": true
+  },
+  "hooks": {
+    "max_timeout_seconds": 10,
+    "allowed_types": [
+      "command"
+    ]
+  },
+  "mcp": {
+    "banned_commands": [
+      "uvx",
+      "pnpx",
+      "bunx"
+    ],
+    "banned_command_patterns": [
+      "(?i)\\bnpx\\s+(?:-y|--yes)\\b",
+      "(?i)\\bnpx\\b.*@latest\\b",
+      "(?i)\\buvx\\b",
+      "(?i)@latest\\b",
+      "(?i)\\b(?:curl|wget)\\b.*\\|\\s*(?:ba|da|z)?sh\\b"
+    ],
+    "banned_url_schemes": [
+      "http://"
+    ],
+    "allow_http_localhost": false,
+    "sse_disallowed_harnesses": [
+      "antigravity",
+      "goose"
+    ],
+    "banned_literal_credential_keys": [
+      "key",
+      "api_key",
+      "apikey",
+      "authorization",
+      "header",
+      "token",
+      "password",
+      "passwd",
+      "secret",
+      "bearer",
+      "client_secret",
+      "private_key",
+      "access_token",
+      "refresh_token",
+      "auth_token"
+    ],
+    "banned_header_names": [
+      "authorization",
+      "x-api-key",
+      "proxy-authorization"
+    ],
+    "banned_cli_args": [
+      "-H",
+      "--header"
+    ],
+    "disallow_url_userinfo": true,
+    "require_oci_digest_pin": true,
+    "allowed_venv_prefix": "~/.local/share/agentconfig/mcp-venvs/"
+  },
+  "env_overrides": {
+    "base_url_var_suffixes": [
+      "_BASE_URL",
+      "_API_BASE",
+      "_API_URL"
+    ],
+    "allowed_base_urls": {
+      "OPENAI_BASE_URL": [
+        "https://api.openai.com/v1"
+      ],
+      "ANTHROPIC_BASE_URL": [
+        "https://api.anthropic.com"
+      ],
+      "GEMINI_BASE_URL": [
+        "https://generativelanguage.googleapis.com"
+      ],
+      "GOOGLE_GEMINI_BASE_URL": [
+        "https://generativelanguage.googleapis.com"
+      ],
+      "XAI_BASE_URL": [
+        "https://api.x.ai/v1"
+      ],
+      "KIMI_BASE_URL": [
+        "https://api.moonshot.ai/v1",
+        "https://api.moonshot.cn/v1"
+      ],
+      "MOONSHOT_BASE_URL": [
+        "https://api.moonshot.ai/v1",
+        "https://api.moonshot.cn/v1"
+      ]
+    }
+  },
+  "unicode": {
+    "ban_invisible_ranges": [
+      ["0x200B", "0x200F"],
+      ["0x202A", "0x202E"],
+      ["0x2060", "0x206F"],
+      ["0xFEFF", "0xFEFF"],
+      ["0xE0000", "0xE007F"]
+    ]
+  },
+  "codex": {
+    "banned_top_level_keys": [
+      "profile",
+      "profiles"
+    ],
+    "banned_approval_policies": [
+      "untrusted"
+    ],
+    "blocked_project_keys": [
+      "openai_base_url",
+      "chatgpt_base_url",
+      "apps_mcp_product_sku",
+      "model_provider",
+      "model_providers",
+      "notify",
+      "profile",
+      "profiles",
+      "experimental_realtime_ws_base_url",
+      "otel"
+    ]
+  },
+  "grok": {
+    "collision_dir": ".grok",
+    "vibekit_markers": [
+      "user-settings.json",
+      "workspace-trust.json"
+    ],
+    "xai_markers": [
+      "config.toml",
+      "managed_config.toml",
+      "requirements.toml",
+      "sandbox.toml",
+      "trusted_folders.toml"
+    ]
+  },
+  "secrets": {
+    "regex_patterns": [
+      {
+        "name": "openai_api_key",
+        "pattern": "\\bsk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{20,}\\b"
+      },
+      {
+        "name": "anthropic_api_key",
+        "pattern": "\\bsk-ant-[A-Za-z0-9_-]{20,}\\b"
+      },
+      {
+        "name": "github_pat",
+        "pattern": "\\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\\b"
+      },
+      {
+        "name": "github_fine_grained_pat",
+        "pattern": "\\bgithub_pat_[A-Za-z0-9_]{22,}\\b"
+      },
+      {
+        "name": "google_api_key",
+        "pattern": "\\bAIza[0-9A-Za-z_-]{35}\\b"
+      },
+      {
+        "name": "aws_access_key",
+        "pattern": "\\b(?:AKIA|ASIA)[0-9A-Z]{16}\\b"
+      },
+      {
+        "name": "age_secret_key",
+        "pattern": "\\bAGE-SECRET-KEY-1[0-9A-Z]{50,}\\b"
+      },
+      {
+        "name": "pem_private_key",
+        "pattern": "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"
+      },
+      {
+        "name": "bearer_token",
+        "pattern": "(?i)\\bBearer\\s+[A-Za-z0-9._-]{16,}"
+      },
+      {
+        "name": "xai_api_key",
+        "pattern": "\\bxai-[A-Za-z0-9_-]{20,}\\b"
+      }
+    ],
+    "entropy_threshold": 4.2,
+    "entropy_min_length": 20,
+    "placeholder_allowlist_patterns": [
+      "^\\$\\{[A-Za-z_][A-Za-z0-9_]*(?::-?[^}]*)?\\}$",
+      "^\\$\\{env:[A-Za-z_][A-Za-z0-9_]*\\}$",
+      "^\\{env:[A-Za-z_][A-Za-z0-9_]*\\}$",
+      "^\\$[A-Za-z_][A-Za-z0-9_]*$"
+    ]
+  },
+  "auth_preservation_paths": [
+    ".gemini/antigravity-cli/antigravity-oauth-token",
+    ".gemini/oauth_creds.json",
+    ".gemini/google_accounts.json",
+    ".config/gh/hosts.yml",
+    ".claude/.credentials.json",
+    ".codex/auth.json",
+    ".kimi-code/credentials",
+    ".grok/auth.json",
+    ".grok/mcp_credentials.json",
+    ".local/share/keyrings"
+  ],
+  "audit_repo_risk_paths": [
+    ".mcp.json",
+    ".vscode/mcp.json",
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".claude/hooks",
+    ".gemini/settings.json",
+    ".codex/config.toml",
+    ".codex/hooks.json",
+    ".codex/rules",
+    ".grok/config.toml",
+    ".grok/hooks",
+    ".grok/settings.json",
+    ".agents/hooks.json",
+    ".agents/plugins.json",
+    ".agents/skills.json",
+    ".devin/hooks.v1.json",
+    ".cursor/mcp.json",
+    ".cursor/hooks.json",
+    ".cline",
+    ".github/hooks"
+  ]
+}

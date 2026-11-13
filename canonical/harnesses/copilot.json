@@ -1,0 +1,38 @@
+{
+  "harness": "copilot",
+  "mcp_schema": "mcpServers",
+  "mcp_format": "json",
+  "http_transport_style": "type_http_url",
+  "env_syntax": "${VAR}",
+  "supports_sse": false,
+  "rules_target": "~/.copilot/copilot-instructions.md",
+  "home_env_var": "COPILOT_HOME",
+  "failsafe_flags": [
+    "--disable-builtin-mcps",
+    "--no-custom-instructions",
+    "--no-auto-update"
+  ],
+  "base_settings": {
+    "autoUpdate": false
+  },
+  "managed_keys": [
+    "autoUpdate"
+  ],
+  "removed_keys": [],
+  "variants": {
+    "copilot-cli": {
+      "mcp_schema": "mcpServers",
+      "mcp_path": "~/.copilot/mcp-config.json"
+    },
+    "vscode-copilot": {
+      "mcp_schema": "servers",
+      "mcp_path": "~/.config/Code/User/mcp.json",
+      "project_mcp_path": ".vscode/mcp.json",
+      "env_syntax": "${input:id}"
+    },
+    "jetbrains-copilot": {
+      "mcp_schema": "servers",
+      "mcp_path": "~/.config/github-copilot/intellij/mcp.json"
+    }
+  }
+}

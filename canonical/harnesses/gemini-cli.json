@@ -1,0 +1,38 @@
+{
+  "harness": "gemini-cli",
+  "mcp_schema": "mcpServers",
+  "mcp_format": "json",
+  "http_transport_style": "httpUrl",
+  "env_syntax": "${VAR}",
+  "supports_sse": true,
+  "rules_target": "~/.gemini/GEMINI.md",
+  "home_env_var": "GEMINI_CLI_HOME",
+  "failsafe_flags": [
+    "--approval-mode",
+    "plan",
+    "--sandbox"
+  ],
+  "base_settings": {
+    "general": {
+      "defaultApprovalMode": "default",
+      "enableAutoUpdate": false
+    },
+    "security": {
+      "folderTrust": {
+        "enabled": true
+      },
+      "disableYoloMode": true
+    },
+    "experimental": {
+      "autoMemory": false
+    }
+  },
+  "managed_keys": [
+    "general.enableAutoUpdate",
+    "security.folderTrust",
+    "security.disableYoloMode",
+    "experimental.autoMemory",
+    "mcpServers"
+  ],
+  "removed_keys": []
+}

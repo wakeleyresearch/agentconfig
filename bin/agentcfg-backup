@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# agentcfg-backup — Produces reproducible git bundle, deterministic tar.gz, sha256 checksums,
+# and optional age-encrypted backup archive outside the repository.
+
+umask 0077
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+OUT_DIR=""
+AGE_RECIPIENT=""
+
+usage() {
+  cat <<'EOF' >&2
+Usage: agentcfg-backup [--repo <dir>] [--out-dir <dir>] [--age-recipient <age1...>]
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --repo)
+      REPO_ROOT="${2:?--repo requires a directory}"
+      shift 2
+      ;;
+    --out-dir)
+      OUT_DIR="${2:?--out-dir requires a directory}"
+      shift 2
+      ;;
+    --age-recipient)
+      AGE_RECIPIENT="${2:?--age-recipient requires an age public key}"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "agentcfg-backup: unknown option: $1" >&2
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+OUT_DIR="${OUT_DIR:-${AGENTCFG_BACKUP_DIR:-$HOME/.local/share/agentconfig/backups}}"
+install -d -m 0700 "$OUT_DIR"
+
+if ! git -C "$REPO_ROOT" rev-parse --verify HEAD >/dev/null 2>&1; then
+  echo "agentcfg-backup: repository at $REPO_ROOT has no git HEAD commit" >&2
+  exit 1
+fi
+
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+HEAD_SHORT="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
+PREFIX="agentconfig-${STAMP}-${HEAD_SHORT}"
+
+BUNDLE_FILE="$OUT_DIR/${PREFIX}.bundle"
+TAR_GZ_FILE="$OUT_DIR/${PREFIX}.tar.gz"
+SHA_FILE="$OUT_DIR/${PREFIX}.sha256"
+
+# 1. Full git bundle preserving commit/tag signatures.
+git -C "$REPO_ROOT" bundle create "$BUNDLE_FILE" --all
+chmod 0600 "$BUNDLE_FILE"
+
+# 2. Deterministic gzip archive from HEAD (zero mtime variance via git archive | gzip -n).
+git -C "$REPO_ROOT" archive --format=tar --prefix="${PREFIX}/" HEAD | gzip -n > "$TAR_GZ_FILE"
+chmod 0600 "$TAR_GZ_FILE"
+
+ARTIFACTS=("$BUNDLE_FILE" "$TAR_GZ_FILE")
+
+# 3. Optional age encryption (uses explicit recipient or reads public recipient from secrets/.sops.yaml).
+if [ -z "$AGE_RECIPIENT" ] && [ -f "$REPO_ROOT/secrets/.sops.yaml" ]; then
+  AGE_RECIPIENT="$(grep -Eo 'age1[0-9a-z]{50,}' "$REPO_ROOT/secrets/.sops.yaml" | head -n 1 || true)"
+fi
+
+AGE_BIN=""
+if command -v age >/dev/null 2>&1; then
+  AGE_BIN="$(command -v age)"
+elif [ -x "$HOME/.local/bin/age" ]; then
+  AGE_BIN="$HOME/.local/bin/age"
+fi
+
+if [ -n "$AGE_BIN" ] && [ -n "$AGE_RECIPIENT" ]; then
+  AGE_TAR="${TAR_GZ_FILE}.age"
+  "$AGE_BIN" -r "$AGE_RECIPIENT" -o "$AGE_TAR" "$TAR_GZ_FILE"
+  chmod 0600 "$AGE_TAR"
+  ARTIFACTS+=("$AGE_TAR")
+fi
+
+# 4. SHA-256 manifest.
+(
+  cd "$OUT_DIR"
+  local_names=()
+  for f in "${ARTIFACTS[@]}"; do
+    local_names+=("$(basename -- "$f")")
+  done
+  sha256sum "${local_names[@]}" > "$SHA_FILE"
+)
+chmod 0600 "$SHA_FILE"
+
+echo "Backup created in $OUT_DIR:"
+ls -la "$BUNDLE_FILE" "$TAR_GZ_FILE" "$SHA_FILE" "${AGE_TAR:-}" 2>/dev/null || true

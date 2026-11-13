@@ -1,0 +1,17 @@
+{
+  "agentconfig-pretool-guard": {
+    "enabled": false,
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf '{\"decision\":\"ask\",\"reason\":\"agentconfig baseline hook check\"}\\n'",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

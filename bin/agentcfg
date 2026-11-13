@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""agentcfg — Pure Python 3.12 stdlib engine for wakeleyresearch/agentconfig."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from lib.audit import audit_repo
+from lib.cleanse import run_cleanse
+from lib.deployer import apply_targets, diff_targets, restore_snapshot, verify_deployed
+from lib.failsafe import failsafe_apply, failsafe_exec, failsafe_restore
+from lib.monitor import doctor, upstream_check, watch_updates
+from lib.paths import RuntimeContext
+from lib.policy import validate_repo
+
+
+def _emit(payload: dict[str, Any], as_json: bool) -> None:
+    if as_json:
+        sys.stdout.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+        return
+
+    if "findings" in payload and "error_count" in payload:
+        for f in payload["findings"]:
+            sys.stdout.write(f"[{f['severity'].upper()}] {f['code']} ({f['path']}): {f['message']}\n")
+        sys.stdout.write(
+            f"validate: {'OK' if payload['ok'] else 'FAILED'} "
+            f"(errors={payload['error_count']}, warnings={payload['warning_count']})\n"
+        )
+        return
+
+    if "diffs" in payload:
+        changed = [d for d in payload["diffs"] if d.get("changed")]
+        if not changed:
+            sys.stdout.write("diff: no changes\n")
+            return
+        for d in changed:
+            sys.stdout.write(d.get("diff", ""))
+        return
+
+    if "checks" in payload:
+        for c in payload["checks"]:
+            sys.stdout.write(f"[{c['status'].upper():5s}] {c['check']}: {c['detail']}\n")
+        sys.stdout.write(f"doctor: {'OK' if payload['ok'] else 'ISSUES FOUND'}\n")
+        return
+
+    sys.stdout.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+
+
+def _add_common_flags(parser: argparse.ArgumentParser, suppress_defaults: bool = False) -> None:
+    kw: dict[str, Any] = {"default": argparse.SUPPRESS} if suppress_defaults else {"default": None}
+    jkw: dict[str, Any] = {"default": argparse.SUPPRESS} if suppress_defaults else {"default": False}
+    parser.add_argument("--repo", help="Override agentconfig repository root", **kw)
+    parser.add_argument("--home", help="Override target HOME directory", **kw)
+    parser.add_argument("--state-dir", help="Override agentcfg state directory", **kw)
+    parser.add_argument("--project", help="Project directory for repo-scoped .agents/ targets", **kw)
+    parser.add_argument(
+        "--grok-flavor",
+        choices=["xai", "vibekit"],
+        help="Explicitly disambiguate ~/.grok/ flavor",
+        **kw,
+    )
+    parser.add_argument("--require-signed", action="store_true", help="Require verified signed git HEAD", **jkw)
+    parser.add_argument("--json", action="store_true", help="Emit JSON output", **jkw)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="agentcfg",
+        description="Security-hardened multi-harness Source-of-Truth engine",
+    )
+    _add_common_flags(parser, suppress_defaults=False)
+
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_val = sub.add_parser("validate", help="Validate repository policies, schemas, budgets, and secrets")
+    _add_common_flags(p_val, suppress_defaults=True)
+    p_val.add_argument("--staged", action="store_true", help="Validate git staged blobs only")
+    p_val.add_argument("--skip-agy", action="store_true", help="Skip agy plugin validate --strict")
+    p_val.add_argument("--no-check-grok", action="store_true", help="Skip live ~/.grok/ ambiguity check")
+
+    p_diff = sub.add_parser("diff", help="Render in-memory and show unified diffs against live targets")
+    _add_common_flags(p_diff, suppress_defaults=True)
+    p_diff.add_argument("--failsafe", action="store_true", help="Diff against failsafe profile")
+
+    p_apply = sub.add_parser("apply", help="Atomically render and deploy targets")
+    _add_common_flags(p_apply, suppress_defaults=True)
+    p_apply.add_argument("--safe", action="store_true", help="Run pre-apply cleanse auto-quarantine")
+    p_apply.add_argument("--approve-drift", action="store_true", help="Proceed despite watch-updates drift")
+
+    p_verify = sub.add_parser("verify", help="Verify live targets against deployed-manifest.json")
+    _add_common_flags(p_verify, suppress_defaults=True)
+
+    p_restore = sub.add_parser("restore", help="Restore targets from a snapshot")
+    _add_common_flags(p_restore, suppress_defaults=True)
+    p_restore.add_argument("--snapshot", help="Snapshot ID under state_dir/snapshots/", default=None)
+
+    p_cleanse = sub.add_parser("cleanse", help="Quarantine corrupt configs, stale runtime artifacts, or poisoned memory")
+    _add_common_flags(p_cleanse, suppress_defaults=True)
+    p_cleanse.add_argument("--scope", choices=["config", "memory", "runtime", "all"], default="config")
+    p_cleanse.add_argument("--dry-run", action="store_true", help="Report findings without moving or editing files")
+    p_cleanse.add_argument("--auto-quarantine", action="store_true", help="Quarantine detected issues (default unless --dry-run)")
+    p_cleanse.add_argument("--include-auth", action="store_true", help="Allow auth file wipe (requires --confirm-wipe-auth)")
+    p_cleanse.add_argument("--confirm-wipe-auth", action="store_true", help="Confirm auth file wipe")
+    p_cleanse.add_argument("--no-restore-targets", action="store_true", help="Do not re-render quarantined SoT config targets")
+    p_cleanse.add_argument("--native-wipe", action="store_true", help="Invoke native memory reset commands in memory scope")
+
+    p_fs = sub.add_parser("failsafe", help="Switch to persistent failsafe profile or launch ephemeral safe session")
+    _add_common_flags(p_fs, suppress_defaults=True)
+    fs_group = p_fs.add_mutually_exclusive_group(required=True)
+    fs_group.add_argument("--apply", action="store_true", help="Atomically swap targets to failsafe profile")
+    fs_group.add_argument("--restore", action="store_true", help="Restore targets from pre-failsafe snapshot")
+    fs_group.add_argument("--exec", dest="exec_harness", help="Run harness inside isolated ephemeral failsafe environment")
+    p_fs.add_argument("harness_args", nargs=argparse.REMAINDER, help="Arguments passed to --exec harness")
+
+    p_audit = sub.add_parser("audit-repo", help="Read-only pre-trust audit of an unfamiliar repository")
+    _add_common_flags(p_audit, suppress_defaults=True)
+    p_audit.add_argument("path", help="Repository directory to inspect")
+    p_audit.add_argument("--strict", action="store_true", help="Fail on medium findings as well as high")
+
+    p_watch = sub.add_parser("watch-updates", help="Monitor local binary, config key-shape, and memory drift")
+    _add_common_flags(p_watch, suppress_defaults=True)
+    p_watch.add_argument("--check", action="store_true", help="Check against host-footprint.json baseline")
+    p_watch.add_argument("--update-baseline", action="store_true", help="Record current footprint as baseline")
+    p_watch.add_argument("--fast", action="store_true", help="Skip spawning external --version checks")
+
+    p_up = sub.add_parser("upstream-check", help="Check pinned upstream schema snapshots (or fetch live with --fetch)")
+    _add_common_flags(p_up, suppress_defaults=True)
+    p_up.add_argument("--fetch", action="store_true", help="Fetch live HTTPS upstream URLs")
+    p_up.add_argument("--update-baseline", action="store_true", help="Update pinned snapshots and hashes")
+
+    p_doc = sub.add_parser("doctor", help="Inspect host tools, permissions, systemd timers, and manifest state")
+    _add_common_flags(p_doc, suppress_defaults=True)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    as_json = bool(getattr(args, "json", False))
+
+    try:
+        ctx = RuntimeContext.from_args(
+            repo=getattr(args, "repo", None),
+            home=getattr(args, "home", None),
+            state_dir=getattr(args, "state_dir", None),
+            project=getattr(args, "project", None),
+            grok_flavor=getattr(args, "grok_flavor", None),
+            require_signed=bool(getattr(args, "require_signed", False)),
+        )
+
+        cmd = args.command
+        if cmd == "validate":
+            rep = validate_repo(
+                ctx,
+                staged=args.staged,
+                run_agy=not args.skip_agy,
+                check_grok_home=not args.no_check_grok,
+            )
+            _emit(rep.to_dict(), as_json)
+            return 0 if rep.ok else 1
+
+        if cmd == "diff":
+            res = diff_targets(ctx, failsafe=args.failsafe)
+            _emit(res, as_json)
+            return 0
+
+        if cmd == "apply":
+            res = apply_targets(
+                ctx,
+                safe=args.safe,
+                approve_drift=args.approve_drift,
+                failsafe=False,
+            )
+            _emit(res, as_json)
+            return 0
+
+        if cmd == "verify":
+            res = verify_deployed(ctx)
+            _emit(res, as_json)
+            return 0 if res.get("ok") else 1
+
+        if cmd == "restore":
+            res = restore_snapshot(ctx, snapshot_id=args.snapshot)
+            _emit(res, as_json)
+            return 0
+
+        if cmd == "cleanse":
+            auto_q = True if not args.dry_run else False
+            if args.auto_quarantine and not args.dry_run:
+                auto_q = True
+            res = run_cleanse(
+                ctx,
+                scope=args.scope,
+                dry_run=args.dry_run,
+                auto_quarantine=auto_q,
+                include_auth=args.include_auth,
+                confirm_wipe_auth=args.confirm_wipe_auth,
+                restore_targets=not args.no_restore_targets,
+                native_wipe=args.native_wipe,
+            )
+            _emit(res, as_json)
+            return 0
+
+        if cmd == "failsafe":
+            if args.apply:
+                res = failsafe_apply(ctx)
+                _emit(res, as_json)
+                return 0
+            if args.restore:
+                res = failsafe_restore(ctx)
+                _emit(res, as_json)
+                return 0
+            extra = list(args.harness_args or [])
+            if extra and extra[0] == "--":
+                extra = extra[1:]
+            return failsafe_exec(ctx, args.exec_harness, extra)
+
+        if cmd == "audit-repo":
+            res = audit_repo(Path(args.path), policy_repo_root=ctx.repo_root)
+            _emit(res, as_json)
+            if args.strict and (res["high_count"] > 0 or res["medium_count"] > 0):
+                return 2
+            return 0 if res["ok"] else 2
+
+        if cmd == "watch-updates":
+            res = watch_updates(ctx, update_baseline=args.update_baseline, fast=args.fast)
+            _emit(res, as_json)
+            return 0 if res.get("ok") else 3
+
+        if cmd == "upstream-check":
+            res = upstream_check(ctx, fetch=args.fetch, update_baseline=args.update_baseline)
+            _emit(res, as_json)
+            return 0 if res.get("ok") else 1
+
+        if cmd == "doctor":
+            res = doctor(ctx)
+            _emit(res, as_json)
+            return 0 if res.get("ok") else 1
+
+    except Exception as exc:
+        err_obj = {"ok": False, "error": str(exc)}
+        if as_json:
+            sys.stdout.write(json.dumps(err_obj, indent=2) + "\n")
+        else:
+            sys.stderr.write(f"agentcfg error: {exc}\n")
+        return 1
+
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,24 @@
+{
+  "harness": "antigravity",
+  "mcp_schema": "mcpServers",
+  "mcp_format": "json",
+  "http_transport_style": "url",
+  "env_syntax": "plugin_variables",
+  "supports_sse": false,
+  "rules_target": "~/.gemini/config/plugins/agentconfig-core/rules/AGENTS.md",
+  "home_env_var": "ANTIGRAVITY_APP_DATA_DIR",
+  "bundle_strategy": "plugin-bundle",
+  "plugin_root": "~/.gemini/config/plugins/agentconfig-core",
+  "repo_exclude_paths": [
+    ".agents/"
+  ],
+  "failsafe_flags": [
+    "--mode",
+    "plan",
+    "--sandbox",
+    "--disable-slash-commands"
+  ],
+  "base_settings": {},
+  "managed_keys": [],
+  "removed_keys": []
+}

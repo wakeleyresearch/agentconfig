@@ -1,0 +1,11 @@
+[Unit]
+Description=agentconfig local harness footprint and drift monitor
+After=default.target
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/usr/bin/python3 %h/agentconfig/bin/agentcfg watch-updates --check --fast
+
+[Install]
+WantedBy=default.target

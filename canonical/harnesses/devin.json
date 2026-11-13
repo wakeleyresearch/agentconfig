@@ -1,0 +1,22 @@
+{
+  "harness": "devin",
+  "mcp_schema": "mcpServers",
+  "mcp_format": "json",
+  "http_transport_style": "transport_http_url",
+  "env_syntax": "${env:VAR}",
+  "supports_sse": false,
+  "rules_target": "~/.config/devin/AGENTS.md",
+  "home_env_var": "XDG_CONFIG_HOME",
+  "failsafe_flags": [
+    "--sandbox",
+    "--respect-workspace-trust",
+    "false"
+  ],
+  "base_settings": {
+    "auto_update": false
+  },
+  "managed_keys": [
+    "auto_update"
+  ],
+  "removed_keys": []
+}

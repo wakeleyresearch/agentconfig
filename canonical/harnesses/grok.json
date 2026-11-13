@@ -1,0 +1,47 @@
+{
+  "harness": "grok",
+  "mcp_schema": "mcp_servers",
+  "mcp_format": "toml",
+  "http_transport_style": "url",
+  "env_syntax": "${VAR}",
+  "supports_sse": false,
+  "rules_target": "~/.grok/AGENTS.md",
+  "home_env_var": "GROK_HOME",
+  "failsafe_flags": [
+    "--no-memory",
+    "--no-plan",
+    "--no-subagents"
+  ],
+  "base_settings": {
+    "memory": {
+      "enabled": false
+    },
+    "compat": {
+      "claude": {
+        "mcps": false
+      },
+      "cursor": {
+        "mcps": false
+      }
+    }
+  },
+  "managed_keys": [
+    "memory.enabled",
+    "compat.claude.mcps",
+    "compat.cursor.mcps",
+    "mcp_servers"
+  ],
+  "removed_keys": [],
+  "flavors": {
+    "xai": {
+      "config_file": "config.toml",
+      "mcp_schema": "mcp_servers",
+      "mcp_format": "toml"
+    },
+    "vibekit": {
+      "config_file": "user-settings.json",
+      "mcp_schema": "mcpServers",
+      "mcp_format": "json"
+    }
+  }
+}

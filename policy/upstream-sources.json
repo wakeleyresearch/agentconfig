@@ -1,0 +1,103 @@
+{
+  "schema_version": "1.0",
+  "sources": {
+    "claude_code_settings_schema": {
+      "harness": "claude-code",
+      "kind": "json_schema",
+      "url": "https://json.schemastore.org/claude-code-settings.json",
+      "snapshot_file": "policy/upstream-schemas/claude-code-settings.schema.json",
+      "sha256": "f26f028ad94a1e2a28e9dad1f80832ab196a8e080bd3a7d7a32e6428a15e0611"
+    },
+    "gemini_cli_settings_schema": {
+      "harness": "gemini-cli",
+      "kind": "json_schema",
+      "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/schemas/settings.schema.json",
+      "snapshot_file": "policy/upstream-schemas/gemini-cli-settings.schema.json",
+      "sha256": "76a9a09dd97faa1f25a9b1f6fa5b98af14f1656dd4296eae9b692f66ea9bda07"
+    },
+    "codex_config_schema": {
+      "harness": "codex",
+      "kind": "json_schema",
+      "url": "https://developers.openai.com/codex/config-schema.json",
+      "snapshot_file": "policy/upstream-schemas/codex-config-schema.json",
+      "sha256": "f515f420927460250181097af8dc72b80a6be4f01f4324a0efef816e46cc9c86"
+    },
+    "opencode_config_schema": {
+      "harness": "opencode",
+      "kind": "json_schema",
+      "url": "https://opencode.ai/config.json",
+      "snapshot_file": "policy/upstream-schemas/opencode-config-schema.json",
+      "sha256": "b0e0a39a0a7cc3e91763bbc73092b2b7dba99b4810bf90750e6df5b077cfa8e7"
+    },
+    "agentskills_spec": {
+      "harness": "open-standard",
+      "kind": "webpage",
+      "url": "https://agentskills.io/specification.md",
+      "snapshot_file": "policy/upstream-schemas/agentskills-spec.md",
+      "sha256": "bf4137a702014f82a022de532e597c5f92ea86fb53fe29ea27bee3bbc1d19738"
+    },
+    "antigravity_cli_docs": {
+      "harness": "antigravity",
+      "kind": "webpage",
+      "url": "https://antigravity.google/docs/cli/reference",
+      "snapshot_file": null,
+      "sha256": "58f0f71bd1e2acf92807dd3dfb6492098062bc7dff76f3c4b54fa2e9dbf52c74"
+    },
+    "gemini_cli_releases": {
+      "harness": "gemini-cli",
+      "kind": "release_feed",
+      "url": "https://github.com/google-gemini/gemini-cli/releases.atom",
+      "snapshot_file": null,
+      "sha256": "6b45bf0a179503b449424198ce60f640c35c99316ee9c922b3e1c454da26974f"
+    },
+    "codex_releases": {
+      "harness": "codex",
+      "kind": "release_feed",
+      "url": "https://github.com/openai/codex/releases.atom",
+      "snapshot_file": null,
+      "sha256": "fada16095d23da509aab61cc981532282f50ed1b2238eb0d7e9ca47247bb2a22"
+    },
+    "copilot_cli_releases": {
+      "harness": "copilot",
+      "kind": "release_feed",
+      "url": "https://github.com/github/copilot-cli/releases.atom",
+      "snapshot_file": null,
+      "sha256": "9941ad2d5dd23ba3199f6409555e922d8900ce6e3998550dd3b08bf3fb7ec6a5"
+    },
+    "kimi_code_releases": {
+      "harness": "kimi-code",
+      "kind": "release_feed",
+      "url": "https://github.com/MoonshotAI/kimi-code/releases.atom",
+      "snapshot_file": null,
+      "sha256": "45bc074a29998ab275fb7934ed9ebbed2af55f68cca8d62311d95b4747ffbb9f"
+    },
+    "opencode_releases": {
+      "harness": "opencode",
+      "kind": "release_feed",
+      "url": "https://github.com/anomalyco/opencode/releases.atom",
+      "snapshot_file": null,
+      "sha256": "1e496fe14356a1461db7298bdf03aa9891676efe6d200d893472a6dd5ddd3970"
+    },
+    "cline_releases": {
+      "harness": "cline",
+      "kind": "release_feed",
+      "url": "https://github.com/cline/cline/releases.atom",
+      "snapshot_file": null,
+      "sha256": "207d7b4188f10b168da2dd05d60302ebb0fa8b5342d1681c28ebfc53042eeddb"
+    },
+    "goose_releases": {
+      "harness": "goose",
+      "kind": "release_feed",
+      "url": "https://github.com/aaif-goose/goose/releases.atom",
+      "snapshot_file": null,
+      "sha256": "92c8c35877d124ea92905901960f0b925767153c5bdf7fbeb318538bc308b8ff"
+    },
+    "aider_releases": {
+      "harness": "aider",
+      "kind": "release_feed",
+      "url": "https://github.com/Aider-AI/aider/releases.atom",
+      "snapshot_file": null,
+      "sha256": "6499d57b5b8b29839c3fc2a7a362d2ea0a5689fa0ec638cf0b6f86c7b3c6c86e"
+    }
+  }
+}

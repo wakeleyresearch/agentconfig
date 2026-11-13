@@ -1,8 +1,8 @@
 # agentconfig
 
-> **Status: Architecture & Concept Draft** — `README.md` and [`docs/CONCEPT.md`](docs/CONCEPT.md) specify the threat model, verified cross-harness research, and planned Source-of-Truth architecture. The runtime engine (`bin/agentcfg`), canonical catalogs (`canonical/`), policies (`policy/`), and environment wrappers (`wrappers/`) are planned implementation targets and do not yet exist in this repository.
+> **Status: Implemented (Phases 1–4 Complete)** — The `agentconfig` Source-of-Truth engine ([`bin/agentcfg`](bin/agentcfg) + [`lib/`](lib/)), security policies ([`policy/`](policy/)), canonical catalogs and failsafe profiles ([`canonical/`](canonical/)), target definitions ([`targets/targets.json`](targets/targets.json)), environment and secret wrappers ([`wrappers/`](wrappers/)), host `systemd` watch timer ([`systemd/`](systemd/)), offline backup helper ([`bin/agentcfg-backup`](bin/agentcfg-backup)), and unit test suite ([`tests/`](tests/)) are implemented in this repository alongside the architecture specification in [`docs/CONCEPT.md`](docs/CONCEPT.md).
 
-`agentconfig` is a security-hardened, Git-backed **Source-of-Truth (SoT)** architecture for managing AI coding agent configurations, rules, skills, MCP servers, hooks, `/tmp/` sandboxing, agent memory hygiene, and update-drift controls across heterogeneous CLI, IDE, and desktop harnesses.
+`agentconfig` is a security-hardened, Git-backed **Source-of-Truth (SoT)** architecture and CLI toolkit for managing AI coding agent configurations, rules, skills, MCP servers, hooks, `/tmp/` sandboxing, agent memory hygiene, and update-drift controls across heterogeneous CLI, IDE, and desktop harnesses.
 
 ---
 
@@ -12,10 +12,11 @@
 2. [Three-Tier Source-of-Truth Architecture](#three-tier-source-of-truth-architecture)
 3. [Supported Agents & Harnesses Matrix](#supported-agents--harnesses-matrix)
 4. [Core Subsystems](#core-subsystems)
-5. [GitHub Ecosystem Reference & Empirical Anti-Patterns](#github-ecosystem-reference--empirical-anti-patterns)
-6. [Planned Repository Layout](#planned-repository-layout)
-7. [Draft Status & Roadmap](#draft-status--roadmap)
-8. [Further Reading](#further-reading)
+5. [CLI & Wrapper Quickstart](#cli--wrapper-quickstart)
+6. [GitHub Ecosystem Reference & Empirical Anti-Patterns](#github-ecosystem-reference--empirical-anti-patterns)
+7. [Repository Layout](#repository-layout)
+8. [Implementation Status & Roadmap](#implementation-status--roadmap)
+9. [Further Reading](#further-reading)
 
 ---
 
@@ -30,7 +31,7 @@ Modern AI coding agents scatter instructions, MCP tool registries, hooks, permis
 
 2. **Malware, Pre-Trust RCE & Supply-Chain Risks**
    - **Untrusted repository configs**: Cloned repos can embed `.mcp.json`, `.vscode/mcp.json`, `.claude/settings.json`, `.gemini/settings.json`, `.codex/config.toml`, `.grok/hooks/*.json`, `.agents/hooks.json`, or `*_BASE_URL` overrides—creating pre-trust remote code execution and API-key exfiltration vectors (e.g., Claude Code pre-trust hook/MCP RCE **CVE-2025-59536** and pre-trust `ANTHROPIC_BASE_URL` key theft **CVE-2026-21852**).
-   - **Unsandboxed extension hooks & mods**: Claude Code Mods (`hooks/register.js`) execute inside the host process without an OS sandbox and—unless gated by managed policy—can override user `deny`/`ask` rules; experimental `.roo/tools/*.{ts,js}` files in Roo Code are auto-approved and copy `.env*` into cache.
+   - **Unsandboxed extension hooks & mods**: Claude Code Mods (`hooks/register.js`) execute inside the host process without an OS sandbox and—unless gated by managed policy—can override user `deny`/`ask` rules.
    - **Floating `npx -y` / `uvx` "rug pulls", typosquatting & tool poisoning**: Unpinned invocations pull mutable upstream versions without confirmation (`uvx --with-requirements` does not enforce hashes; npm `mcp-server-git`/`mcp-server-sqlite` are third-party/placeholder packages compared to official PyPI servers); malicious servers swap tool descriptions (**tool poisoning**) or spoof tools (**tool shadowing**).
    - **Poisoned skills & plugins**: Community `SKILL.md` files, `AGENTS.md` instructions, or plugin bundles hide invisible Unicode directives (`U+200B..U+200F`, `U+202A..U+202E`, Tags `U+E0000..U+E007F`) or malicious `hooks.json` / `scripts/*.sh` payloads.
    - **Plaintext credential exposure**: Under permissive `umask 0002`, config files and runtime logs/DBs default to world-readable `0644`/`0755`, exposing inline tokens, unencrypted logs (Claude Desktop `audit.jsonl`, `plugin-mcp-auth/.credentials.json` on Linux/Windows, Codex `$CODEX_HOME/auth.json` when `file`-backed), or leaking parent environment secrets into child stdio processes.
@@ -44,7 +45,7 @@ Modern AI coding agents scatter instructions, MCP tool registries, hooks, permis
      - **Codex CLI**: `v0.134.0+` dropped `[profiles.*]` / `profile =` (profiles moved to standalone `$CODEX_HOME/<name>.config.toml`); `v0.149.0+` retired `approval_policy = "untrusted"` (crashes on startup).
      - **Antigravity (`agy`)**: `1.5.7` changed default Agent Mode to `Auto`, `1.5.8` fixed UTF-8 BOM config dropping, `1.x -> 2.0` migrated IDE paths, `plugin.json` silently drops unknown keys and rejects out-of-plugin symlinks, and Antigravity 2.0 skips repo `.agents/` files listed in `.gitignore` (requiring `.git/info/exclude`).
      - **Copilot & VS Code**: Copilot CLI superseded `config.json` user settings with `settings.json`, drops unsupported external `mcp-config.json` keys (e.g. `"disabled": true`), and prerelease binaries can re-exec *before* parsing `settings.json`; VS Code deprecated `.chatmode.md` -> `.agent.md` and scheduled legacy Local harness removal for February 2027.
-     - **Emerging harnesses**: OpenCode V2 changed `external_directory` default from `ask` to `allow` and breaks V1 plugins; Cursor 2.1 removed automated Memories; Windsurf IDE rebrands to **Devin Desktop** (June 2, 2026) and Devin CLI v3000.3 split `mcp_config.json`; **Roo Code** sunsets May 15, 2026; xAI Grok Build collides on `~/.grok/` / `.grok/` with unofficial `@vibe-kit/grok-cli`.
+     - **Emerging harnesses**: OpenCode V2 changed `external_directory` default from `ask` to `allow` and breaks V1 plugins; Cursor 2.1 removed automated Memories; Devin CLI v3000.3 split `mcp_config.json` out of `config.json`; xAI Grok Build collides on `~/.grok/` / `.grok/` with unofficial `@vibe-kit/grok-cli`.
 
 ---
 
@@ -97,16 +98,16 @@ All target model families, harnesses, and cross-agent open standards are verifie
 | **GitHub Copilot** (CLI, `github/app` Desktop, VS Code, JetBrains, Coding Agent) | `~/.copilot/` (`COPILOT_HOME`), `~/.config/Code/User/`, `~/.config/github-copilot/intellij/` | `~/.copilot/{settings.json,mcp-config.json,lsp-config.json,providers.json,copilot-instructions.md,skills/,agents/}`, `.vscode/mcp.json` (`servers`), `.github/{copilot-instructions.md,instructions/,agents/*.agent.md,prompts/,hooks/*.json,github-app.yml}` | `~/.config/gh/hosts.yml`, `COPILOT_GITHUB_TOKEN` / `GH_TOKEN`, BYOK keys in `providers.json`, inline `Authorization` headers | Server-side **Copilot Memory** (code citations + JIT check + 28d TTL), `session-state/`, `session-store.db`; `/tmp/.mount_*`, `/tmp/vscode-*.sock`, containerized `/tmp/` `events.jsonl` | `COPILOT_HOME`, `--disable-builtin-mcps`, `--disable-mcp-server`, `--no-custom-instructions`, `COPILOT_AUTO_UPDATE=false`, `/memory off`, VS Code `chat.copilot.memory.enabled: false` + GitHub UI purge |
 | **Anthropic Claude** (Claude Code CLI/IDE, Claude Desktop 1P/3P, Cowork) | `~/.claude/` (`CLAUDE_CONFIG_DIR`), `~/.claude.json`, `/etc/claude-code/`, `~/.config/Claude{,-3p}/` | `settings.json`, `managed-settings.json`, `CLAUDE.md`, `.claude/{rules/*.md,skills/,agents/,settings.json}`, `.mcp.json`, `claude_desktop_config.json`, `.claude-plugin/` | `~/.claude/.credentials.json`, OS keychain, Desktop `ccd-session-secrets/`, `plugin-mcp-auth/.credentials.json` (plaintext Win/Linux) | `~/.claude/projects/*/memory/MEMORY.md`, subagent `memory:`, Desktop `spaces/<id>/memory/` & `audit.jsonl`; `$CLAUDE_CODE_TMPDIR/claude-<uid>/`, sandbox inherits host `$TMPDIR` | **`claude --safe-mode`** (`CLAUDE_CODE_SAFE_MODE=1`), `claude --restricted`, `claude --bare` (`CLAUDE_CODE_SIMPLE=1`), `--strict-mcp-config`, `--setting-sources`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, `claude doctor`, `claude purge` |
 | **OpenAI** (Codex CLI/App/IDE, ChatGPT Desktop/Web) | `~/.codex/` (`CODEX_HOME`, `CODEX_SQLITE_HOME`), `/etc/codex/` | `config.toml`, `<name>.config.toml` (`--profile <name>`; `[profiles.*]` dropped `v0.134.0+`), `requirements.toml`, `AGENTS.md`/`AGENTS.override.md`, `hooks.json`, `rules/*.rules`, `agents/*.toml` | `$CODEX_HOME/auth.json` (plaintext if `file`), MCP OAuth tokens, `$CODEX_HOME/memories/extensions/skysight/` unencrypted logs | `$CODEX_HOME/{memories,memories_v2}/` (`MEMORY.md`, `memory_summary.md`), SQLite (`state_5`, `logs_2`, `goals_1`, `memories_1`, `memories_v2_1`, `queue_1`, `thread_history_1`); `hook_outputs/`, `bwrap` `/tmp`; ChatGPT cloud memory | **`codex --ask-for-approval on-request --sandbox read-only`** (`untrusted` retired `v0.149.0+`), standalone `$CODEX_HOME/failsafe.config.toml` via `--profile failsafe`, `CODEX_HOME=$(mktemp -d)`, `--strict-config`, `--no-daemon`, `[features].memories = false`, `codex debug clear-memories`, `codex doctor` |
-| **Moonshot Kimi** (`kimi-code`, legacy `kimi-cli`) | `~/.kimi-code/` (`KIMI_CODE_HOME`; legacy `~/.kimi/`), `~/.agents/` (via `$HOME`) | `config.toml`, `tui.toml`, `SYSTEM.md`, `AGENTS.md`, `mcp.json`, `skills/`, `agents/`, project `.kimi-code/{local.toml,mcp.json,AGENTS.md,skills/}` | `credentials/*.json`, `credentials/mcp/*.json` (`0600`), `api_key_env` mapping | Session `contextMemory` + `wire.jsonl` + `AGENTS.md`/`SYSTEM.md`; adjacent binary `.staging/` updates & `updates/install.lock` | `kimi doctor [config\|tui]`, `--skills-dir`, `--agent-file`, `KIMI_DISABLE_CRON=1`, `KIMI_CODE_WATCH=false`, `CONFIG_PERSIST_BLOCKED`, `/reload` |
+| **Moonshot Kimi** (`kimi-code`) | `~/.kimi-code/` (`KIMI_CODE_HOME`), `~/.agents/` (via `$HOME`) | `config.toml`, `tui.toml`, `SYSTEM.md`, `AGENTS.md`, `mcp.json`, `skills/`, `agents/`, project `.kimi-code/{local.toml,mcp.json,AGENTS.md,skills/}` | `credentials/*.json`, `credentials/mcp/*.json` (`0600`), `api_key_env` mapping | Session `contextMemory` + `wire.jsonl` + `AGENTS.md`/`SYSTEM.md`; adjacent binary `.staging/` updates & `updates/install.lock` | `kimi doctor [config\|tui]`, `--skills-dir`, `--agent-file`, `KIMI_DISABLE_CRON=1`, `KIMI_CODE_WATCH=false`, `CONFIG_PERSIST_BLOCKED`, `/reload` |
 | **xAI Grok** (Grok Build vs `@vibe-kit/grok-cli`) | `$GROK_HOME` (`~/.grok/` — collides w/ `@vibe-kit/grok-cli`!), `/etc/grok/` | `config.toml`, `managed_config.toml`, `requirements.toml`, `sandbox.toml`, `trusted_folders.toml`, `hooks/*.json`, `skills/`, `AGENTS.md` | `auth.json`, `mcp_credentials.json` | Opt-in memory (`GROK_MEMORY=0` default, `--experimental-memory`), `sessions/`, `bwrap` (`sandbox.toml`) | `grok inspect`, `grok mcp doctor`, `grok plugin validate`, `--no-memory`, `--no-plan`, `GROK_{CURSOR,CLAUDE}_*=0`, `GROK_DISABLE_AUTOUPDATER=1`, `grok memory clear --all` |
-| **Cross-Model & IDE Harnesses** (OpenCode V2, Cursor, Devin/Windsurf, Cline, Roo Code, Goose, Aider) | XDG (`~/.config/opencode/`, `~/.config/devin/`, `~/.config/goose/`), `~/.cursor/`, `~/.cline/`, `~/.aider.conf.yml` | `AGENTS.md` (all except Aider natively), `~/.agents/skills/*/SKILL.md`, `agent-plugins.org` `plugin.json`; per-harness `opencode.jsonc`, `.cursor/rules/*.mdc`, `mcp_config.json`, `cline_mcp_settings.json`, `config.yaml`, `.aider.conf.yml` | Goose `secrets.yaml`, Cline `providers.json`, inline headers, Roo Settings Export (plaintext keys!) | OpenCode SQLite (`OPENCODE_DB`), Cursor Memories **removed in 2.1**, Cline `memory-bank/*.md`, Goose `~/.config/goose/memory/`, Aider `.aider.{chat,input}.history`; `/tmp/opencode` | OpenCode `--standalone` / `OPENCODE_DB=:memory:`, Cursor `CURSOR_CONFIG_DIR` / `--sandbox`, Devin `--config` / `/rm-session`, Cline `cline doctor [fix\|log]`, Goose `goose run --no-session` / `GOOSE_PATH_ROOT`, Aider `--no-check-update` / `--no-restore-chat-history` *(Roo Code sunsets May 15, 2026)* |
+| **Cross-Model & IDE Harnesses** (OpenCode V2, Cursor, Devin, Cline, Goose, Aider) | XDG (`~/.config/opencode/`, `~/.config/devin/`, `~/.config/goose/`), `~/.cursor/`, `~/.cline/`, `~/.aider.conf.yml` | `AGENTS.md` (all except Aider natively), `~/.agents/skills/*/SKILL.md`, `agent-plugins.org` `plugin.json`; per-harness `opencode.jsonc`, `.cursor/rules/*.mdc`, `mcp_config.json`, `cline_mcp_settings.json`, `config.yaml`, `.aider.conf.yml` | Goose `secrets.yaml`, Cline `providers.json`, inline headers | OpenCode SQLite (`OPENCODE_DB`), Cursor Memories **removed in 2.1**, Cline `memory-bank/*.md`, Goose `~/.config/goose/memory/`, Aider `.aider.{chat,input}.history`; `/tmp/opencode` | OpenCode `--standalone` / `OPENCODE_DB=:memory:`, Cursor `CURSOR_CONFIG_DIR` / `--sandbox`, Devin `--config` / `/rm-session`, Cline `cline doctor [fix\|log]`, Goose `goose run --no-session` / `GOOSE_PATH_ROOT`, Aider `--no-check-update` / `--no-restore-chat-history` |
 
 ---
 
 ## Core Subsystems
 
 ### 1. `agentcfg` Safe Applicator & Integrity Engine
-A planned Python 3.12 stdlib engine (`bin/agentcfg`, zero mandatory external Python dependencies) enforcing deterministic, verified deployments:
+A Python 3.12 stdlib engine (`bin/agentcfg` + `lib/*.py`, zero PyPI/third-party Python dependencies, with optional host GIR `gi.repository.Secret` fallback alongside `secret-tool`/`sops`) enforcing deterministic, verified deployments:
 - **Pre-commit & pre-apply validation (`agentcfg validate`)**: Parses JSON (`json`), TOML (`tomllib`), and YAML frontmatter; enforces Antigravity's `24,000`-byte rule cap, Kimi's `32 KiB` `AGENTS.md` warning threshold, and `agy plugin validate --strict`; enforces `policy/security-policy.json` (bans floating `npx -y`/`uvx`/`@latest`, plain `http://` remote MCPs, legacy `/sse` in Antigravity/Goose, unauthorized `*_BASE_URL` overrides, literal credential keys/headers, and invisible Unicode).
 - **Pre-built locked MCP runtimes**: Enforces locked per-server install prefixes (`~/.local/share/agentconfig/mcp-venvs/<srv>/` via `uv pip install --require-hashes` / `npm ci --ignore-scripts` with `min-release-age=7`) or digest-pinned OCI images (`image@sha256:...`), plus `tools/list` SHA-256 pinning in `policy/manifests.lock.json`.
 - **Secret scanning**: Runs `gitleaks` plus a built-in regex (`sk-`, `ghp_`, `AIza`, `AKIA`, `AGE-SECRET-KEY-`, PEM headers, `Bearer `) and Shannon entropy fallback so scanning never silently degrades.
@@ -118,7 +119,7 @@ A planned Python 3.12 stdlib engine (`bin/agentcfg`, zero mandatory external Pyt
   5. Writes generated project `.agents/` paths into `.git/info/exclude` (never `.gitignore`, ensuring Antigravity 2.0 loads them without dirtying `git status`).
 - **Manifest, diff, audit & provenance**:
   - `agentcfg verify` & `agentcfg diff`: Validates live SHA-256 checksums and file permissions against `~/.local/state/agentcfg/deployed-manifest.json`.
-  - `agentcfg audit-repo <path>`: Scans untrusted repositories before opening for `.mcp.json`, `.vscode/mcp.json`, `.claude/`, `.codex/`, `.grok/`, `.roo/tools/`, `.agents/{hooks,plugins,skills}.json`, and `*_BASE_URL` overrides.
+  - `agentcfg audit-repo <path>`: Scans untrusted repositories before opening for `.mcp.json`, `.vscode/mcp.json`, `.claude/`, `.codex/`, `.grok/`, `.agents/{hooks,plugins,skills}.json`, and `*_BASE_URL` overrides.
   - **Signed Git provenance & offline backup**: SSH-signed Git commits/tags (`gpg.format ssh`) plus reproducible offline `git bundle` + `tar.gz` + `sha256sum` (+ optional `age` encryption).
 
 ### 2. `agentcfg cleanse` & Quarantine
@@ -153,6 +154,75 @@ Remediates corrupted state into a timestamped, non-executable `0700` quarantine 
 
 ---
 
+## CLI & Wrapper Quickstart
+
+All `agentcfg` commands accept optional global overrides before the subcommand:
+
+```text
+python3 bin/agentcfg [--repo REPO] [--home HOME] [--state-dir STATE_DIR] \
+  [--project PROJECT] [--grok-flavor {xai,vibekit}] [--require-signed] [--json] <subcommand>
+```
+
+### Core `agentcfg` Commands
+
+```bash
+# 1. Inspect host tooling, permissions, systemd timers, and manifest state
+python3 bin/agentcfg doctor
+
+# 2. Validate policy rules, schemas, byte budgets, and secret scans
+python3 bin/agentcfg validate [--staged] [--skip-agy] [--no-check-grok]
+
+# 3. Preview unified diffs against live targets (or against canonical failsafe baseline)
+python3 bin/agentcfg diff [--failsafe]
+
+# 4. Atomically render and deploy targets (optionally quarantine corrupt state first)
+python3 bin/agentcfg apply [--safe] [--approve-drift]
+
+# 5. Verify live targets against ~/.local/state/agentcfg/deployed-manifest.json
+python3 bin/agentcfg verify
+
+# 6. Restore targets from a recorded snapshot under state_dir/snapshots/
+python3 bin/agentcfg restore [--snapshot SNAPSHOT]
+
+# 7. Quarantine corrupt configs, stale runtime locks/DBs/tmps, or poisoned memory
+python3 bin/agentcfg cleanse [--scope {config,memory,runtime,all}] [--dry-run] \
+  [--auto-quarantine] [--include-auth] [--confirm-wipe-auth] \
+  [--no-restore-targets] [--native-wipe]
+
+# 8. Switch live targets to/from failsafe or launch an isolated ephemeral failsafe session
+python3 bin/agentcfg failsafe (--apply | --restore | --exec EXEC_HARNESS) [harness_args...]
+
+# 9. Pre-trust read-only audit of an unfamiliar repository before opening an agent
+python3 bin/agentcfg audit-repo [--strict] <path>
+
+# 10. Local binary, config key-shape, and memory drift baseline checks
+python3 bin/agentcfg watch-updates [--check] [--update-baseline] [--fast]
+
+# 11. Compare pinned upstream schema snapshots (or fetch live HTTPS specs with --fetch)
+python3 bin/agentcfg upstream-check [--fetch] [--update-baseline]
+```
+
+### Runtime Wrappers, Offline Backup & Tests
+
+```bash
+# Run any harness with umask 0077, two-tier 0700 $TMPDIR / $XDG_RUNTIME_DIR,
+# optional failsafe env, or bwrap sandboxing for untrusted repos:
+wrappers/agent-env-run [--home <dir>] [--repo <dir>] [--failsafe] \
+  [--untrusted] [--require-bwrap] [--rw-cwd] -- <command> [args...]
+
+# Inject only allowlisted secrets from gnome-keyring / sops+age under env -i:
+wrappers/mcp-secret-exec [--secret-ref ENV_VAR=REF]... [--unshare-net] \
+  [--require-bwrap] [--repo <dir>] -- <cmd> [args...]
+
+# Create reproducible offline git bundle + deterministic tar.gz + SHA-256 (+ optional age encryption):
+bin/agentcfg-backup [--repo <dir>] [--out-dir <dir>] [--age-recipient <age1...>]
+
+# Run the unit & integration test suite:
+python3 -m unittest discover -s tests -v
+```
+
+---
+
 ## GitHub Ecosystem Reference & Empirical Anti-Patterns
 
 Ecosystem research (`#26`, verified in `#27`) benchmarked major open-source config managers, security baselines, and empirical failure modes across public GitHub repositories:
@@ -180,64 +250,92 @@ Ecosystem research (`#26`, verified in `#27`) benchmarked major open-source conf
 
 ---
 
-## Planned Repository Layout
+## Repository Layout
 
 ```text
 /home/omniboot/agentconfig/
-├── README.md                              # Project overview & roadmap (this file)
+├── README.md                                  # Project overview, CLI quickstart & roadmap (this file)
 ├── docs/
-│   └── CONCEPT.md                         # Full architecture, per-harness spec & threat model
-├── .gitignore                             # Blocks *.dec.*, .age/, dist/, *.tmp, state/, backups/
+│   └── CONCEPT.md                             # Full architecture, per-harness spec & threat model
+├── .gitignore                                 # Blocks *.dec.*, .age/, dist/, *.tmp, state/, backups/
 ├── .githooks/
-│   └── pre-commit                         # Tracked secret, syntax, & policy gate
+│   └── pre-commit                             # Tracked secret, syntax, & policy gate
 ├── .github/
 │   └── workflows/
-│       └── upstream-schema-watch.yml      # Scheduled upstream schema & release diff monitor
-├── policy/
-│   ├── security-policy.json               # Banned patterns (npx -y, http:// MCP), size caps, allowed *_BASE_URLs
-│   ├── manifests.lock.json                # Pinned MCP versions, package integrity hashes, tools/list SHA-256
-│   ├── upstream-sources.json              # Pinned upstream JSON schema & release-note URLs
-│   └── upstream-schemas/                  # Pinned reference schema snapshots for diffing
-├── canonical/
-│   ├── rules/                             # Shared Markdown rules (<=24,000 B Antigravity / <=32 KiB Kimi checks)
-│   ├── skills/                            # Reviewed <skill>/SKILL.md + reviewed scripts/
-│   ├── hooks/                             # Reviewed hooks.json fragments + scripts (<=10s timeout)
-│   ├── mcp-registry.json                  # Canonical MCP catalog (uses secret_ref IDs, ZERO secrets)
-│   ├── harnesses/                         # Per-harness deterministic render templates
-│   └── profiles/
-│       └── failsafe/                      # Built-in zero-trust minimal baseline per harness
-├── secrets/
-│   ├── .sops.yaml                         # age public-key recipients & encryption rules
-│   └── secrets.enc.yaml                   # Optional SOPS+age encrypted secrets (NEVER plaintext)
-├── targets/
-│   └── targets.json                       # Target path, mode (0400/0444/0600), strategy (ro|patch-managed-keys|plugin-bundle)
+│       └── upstream-schema-watch.yml          # Scheduled upstream schema & release diff monitor
+├── bin/
+│   ├── agentcfg                               # Python 3.12 CLI entrypoint (11 subcommands)
+│   └── agentcfg-backup                        # Offline git bundle + tar.gz + sha256sum (+ age) helper
+├── lib/                                       # Pure Python 3.12 stdlib engine (zero PyPI deps; optional GIR Secret)
+│   ├── __init__.py
+│   ├── audit.py                               # Untrusted repo scanner (audit-repo)
+│   ├── cleanse.py                             # Config/memory/runtime quarantine & auth-preservation
+│   ├── deployer.py                            # Atomic staging, flock, snapshots, manifest, verify/restore
+│   ├── failsafe.py                            # Persistent failsafe swap & ephemeral session launcher
+│   ├── formats.py                             # JSON/JSONC/TOML/YAML parsers & key-allowlist patchers
+│   ├── monitor.py                             # Local footprint watch-updates & upstream-check
+│   ├── paths.py                               # Repo/home/state path resolution & Grok flavor checks
+│   ├── policy.py                              # Policy enforcement, budgets, invisible Unicode & secret fallback
+│   └── render.py                              # Canonical -> per-harness target renderers
 ├── wrappers/
-│   ├── agent-env-run                      # Sets umask 0077, private $TMPDIR, $XDG_RUNTIME_DIR, --failsafe, optional bwrap
-│   └── mcp-secret-exec                    # Fetches scoped secret via secret-tool/sops -> exec env -i <VAR>=... <cmd>
-└── bin/
-    └── agentcfg                           # Python 3.12 stdlib CLI: validate, diff, apply, verify, cleanse, failsafe, restore, audit-repo, watch-updates, upstream-check, doctor
+│   ├── agent-env-run                          # umask 0077, private 0700 $TMPDIR/$XDG_RUNTIME_DIR, --failsafe, bwrap
+│   └── mcp-secret-exec                        # secret-tool / gi.Secret / sops+age -> env -i <VAR>=... <cmd>
+├── systemd/
+│   ├── agentcfg-watch.service                 # User oneshot service for agentcfg watch-updates --check
+│   └── agentcfg-watch.timer                   # Periodic user systemd timer
+├── policy/
+│   ├── security-policy.json                   # Banned patterns (npx -y, http:// MCP), size caps, allowed *_BASE_URLs
+│   ├── manifests.lock.json                    # Pinned MCP versions, package integrity hashes, tools/list SHA-256
+│   ├── upstream-sources.json                  # Pinned upstream JSON schema & release-note URLs
+│   └── upstream-schemas/                      # Pinned reference snapshots (agentskills, claude-code, codex, gemini-cli, opencode)
+├── canonical/
+│   ├── rules/
+│   │   └── core.md                            # Shared canonical baseline rules
+│   ├── skills/
+│   │   └── agent-hygiene/
+│   │       └── SKILL.md                       # Shared hygiene & pre-trust review skill
+│   ├── hooks/
+│   │   └── hooks.json                         # Canonical reviewed hook definitions
+│   ├── mcp-registry.json                      # Canonical MCP catalog (uses secret_ref IDs, ZERO secrets)
+│   ├── harnesses/                             # 13 per-harness specs (aider, antigravity, claude-code, cline, codex,
+│   │                                          #   copilot, cursor, devin, gemini-cli, goose, grok, kimi-code, opencode)
+│   └── profiles/
+│       └── failsafe/                          # Minimal zero-trust failsafe baseline (rules.md + all 13 harnesses)
+├── targets/
+│   └── targets.json                           # Target paths, modes (0400/0444/0600), strategies (ro|patch-managed-keys|plugin-bundle)
+├── secrets/
+│   ├── .sops.yaml                             # age public-key recipients & encryption rules
+│   └── README.md                              # Secret provisioning guide (secrets.enc.yaml optional locally)
+└── tests/                                     # Isolated tempdir unittest suite (helpers.py + 5 test modules)
+    ├── __init__.py
+    ├── helpers.py
+    ├── test_validate.py
+    ├── test_rendering_and_schemas.py
+    ├── test_deploy_apply_verify_restore.py
+    ├── test_cleanse.py
+    └── test_watch_audit_wrappers.py
 ```
 
 ---
 
-## Draft Status & Roadmap
+## Implementation Status & Roadmap
 
 - [x] **Phase 0 — Research & Architecture Concept (`main` docs)**:
   - Host baseline audit (`/home/omniboot`, `/tmp/`, `~/.gemini/`, `~/.cache/antigravity/`).
-  - Verified deep-dive specs across all target models and harnesses: Google Antigravity (`agy` 1.5.8, App 2.0, IDE, SDK), Google Gemini CLI, GitHub Copilot (CLI, `github/app`, VS Code, JetBrains, Coding Agent), OpenAI (Codex CLI/App/IDE, ChatGPT Desktop/Web), Anthropic (Claude Code CLI/IDE, Claude Desktop 1P/3P, Cowork), Moonshot Kimi (`kimi-code`/`kimi-cli`), xAI Grok (Grok Build & `@vibe-kit/grok-cli` collision), and cross-model harnesses (OpenCode V2, Cursor, Devin/Windsurf, Cline, Roo Code [sunset May 15, 2026], Goose, Aider), plus open standards (`AGENTS.md`, `SKILL.md`, `agent-plugins.org`).
+  - Verified deep-dive specs across all target models and harnesses: Google Antigravity (`agy` 1.5.8, App 2.0, IDE, SDK), Google Gemini CLI, GitHub Copilot (CLI, `github/app`, VS Code, JetBrains, Coding Agent), OpenAI (Codex CLI/App/IDE, ChatGPT Desktop/Web), Anthropic (Claude Code CLI/IDE, Claude Desktop 1P/3P, Cowork), Moonshot Kimi (`kimi-code`), xAI Grok (Grok Build & `@vibe-kit/grok-cli` collision), and cross-model harnesses (OpenCode V2, Cursor, Devin, Cline, Goose, Aider), plus open standards (`AGENTS.md`, `SKILL.md`, `agent-plugins.org`).
   - GitHub ecosystem benchmark & empirical anti-pattern audit (`#26`, `#27`).
   - Threat model, `/tmp/` & memory hardening design, `cleanse`, `failsafe`, and update-monitoring architecture ([`docs/CONCEPT.md`](docs/CONCEPT.md)).
-- [ ] **Phase 1 — Host Hardening & Repo Guardrails**:
-  - Install host dependencies (`libsecret-tools`, `age`, `gitleaks`, pinned `sops`), enable SSH Git commit/tag signing, configure `.githooks/pre-commit`, tighten `~/.gemini/` & `~/.cache/antigravity/` to `0700`/`0600`, and deploy `~/.config/user-tmpfiles.d/agent-tmp.conf`.
-- [ ] **Phase 2 — Core `agentcfg` Engine, `cleanse` & `failsafe`**:
-  - Implement Python 3.12 `bin/agentcfg` (`validate`, `diff`, `apply --safe`, `verify`, `restore`, `cleanse`, `failsafe`, `audit-repo`) and `wrappers/{agent-env-run,mcp-secret-exec}`.
-- [ ] **Phase 3 — Canonical Catalog & Per-Harness Renderers**:
-  - Populate `canonical/`, `targets/targets.json`, `policy/manifests.lock.json`, and deterministic renderers (with `.git/info/exclude` wiring for repo `.agents/` targets).
-- [ ] **Phase 4 — Update Monitors & Offline Recovery**:
-  - Implement `agentcfg watch-updates`, `systemd --user` timer, `.github/workflows/upstream-schema-watch.yml`, and reproducible offline `git bundle` + `age` backup scripts.
+- [x] **Phase 1 — Host Hardening & Repo Guardrails**:
+  - Host tooling provisioned (`age` `v1.3.2`, `sops` `3.13.3`, `gitleaks` `8.30.1` in `~/.local/bin/`, GIR `gi.repository.Secret` available), SSH Git commit/tag signing + `.githooks/pre-commit` configured, `~/.gemini/` & `~/.cache/antigravity/` tightened to `0700`/`0600`, and `~/.local/tmp{,/claude}` (`0700`) + `~/.config/user-tmpfiles.d/agent-tmp.conf` active under `systemd-tmpfiles`.
+- [x] **Phase 2 — Core `agentcfg` Engine, `cleanse` & `failsafe`**:
+  - Implemented Python 3.12 stdlib `bin/agentcfg` + `lib/*.py` (`validate`, `diff`, `apply --safe`, `verify`, `restore`, `cleanse`, `failsafe`, `audit-repo`, `doctor`), `wrappers/{agent-env-run,mcp-secret-exec}`, and isolated `tests/` suite.
+- [x] **Phase 3 — Canonical Catalog & Per-Harness Renderers**:
+  - Populated `policy/`, `canonical/` (shared rules, `SKILL.md`, hooks, MCP registry, 13 harness definitions, and `canonical/profiles/failsafe/`), `targets/targets.json`, and deterministic renderers with `.git/info/exclude` wiring for repo `.agents/` targets.
+- [x] **Phase 4 — Update Monitors & Offline Recovery**:
+  - Implemented `agentcfg watch-updates`, `agentcfg upstream-check`, `systemd/agentcfg-watch.{service,timer}` (seeded `host-footprint.json` baseline and active user timer), `.github/workflows/upstream-schema-watch.yml`, and reproducible offline `bin/agentcfg-backup`.
 
 ---
 
 ## Further Reading
 
-- [`docs/CONCEPT.md`](docs/CONCEPT.md) — Complete threat model, per-harness configuration/memory/`/tmp/` specifications, `cleanse`/`failsafe` state machines, GitHub ecosystem benchmark, atomic deployment protocol, and open design decisions.
+- [`docs/CONCEPT.md`](docs/CONCEPT.md) — Complete threat model, per-harness configuration/memory/`/tmp/` specifications, `cleanse`/`failsafe` state machines, GitHub ecosystem benchmark, atomic deployment protocol, and ratified implementation architecture.

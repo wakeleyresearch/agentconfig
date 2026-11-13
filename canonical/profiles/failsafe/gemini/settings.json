@@ -1,0 +1,16 @@
+{
+  "general": {
+    "defaultApprovalMode": "plan",
+    "enableAutoUpdate": false
+  },
+  "security": {
+    "folderTrust": {
+      "enabled": true
+    },
+    "disableYoloMode": true
+  },
+  "experimental": {
+    "autoMemory": false
+  },
+  "mcpServers": {}
+}

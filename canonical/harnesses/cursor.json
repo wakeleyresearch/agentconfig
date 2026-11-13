@@ -1,0 +1,16 @@
+{
+  "harness": "cursor",
+  "mcp_schema": "mcpServers",
+  "mcp_format": "json",
+  "http_transport_style": "url",
+  "env_syntax": "${env:VAR}",
+  "supports_sse": false,
+  "rules_target": "~/.agents/AGENTS.md",
+  "home_env_var": "CURSOR_CONFIG_DIR",
+  "failsafe_flags": [
+    "--sandbox"
+  ],
+  "base_settings": {},
+  "managed_keys": [],
+  "removed_keys": []
+}

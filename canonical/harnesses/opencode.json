@@ -1,0 +1,32 @@
+{
+  "harness": "opencode",
+  "mcp_schema": "mcp.servers",
+  "mcp_format": "jsonc",
+  "http_transport_style": "type_remote_url",
+  "env_syntax": "{env:VAR}",
+  "supports_sse": false,
+  "rules_target": "~/.config/opencode/AGENTS.md",
+  "home_env_var": "OPENCODE_CONFIG_DIR",
+  "failsafe_flags": [
+    "--standalone"
+  ],
+  "base_settings": {
+    "$schema": "https://opencode.ai/config.json",
+    "update": "disable",
+    "permissions": {
+      "external_directory": "ask"
+    },
+    "mcp": {
+      "servers": {}
+    }
+  },
+  "managed_keys": [
+    "update",
+    "permissions.external_directory",
+    "mcp.servers"
+  ],
+  "removed_keys": [
+    "autoupdate",
+    "permission"
+  ]
+}

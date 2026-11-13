@@ -1,0 +1,285 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# agent-env-run — Enforces umask 0077, two-tier 0700 temp dirs, optional --failsafe, and optional --untrusted bwrap isolation.
+
+umask 0077
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+HOME_OVERRIDE=""
+FAILSAFE=0
+UNTRUSTED=0
+REQUIRE_BWRAP=0
+RW_CWD=0
+
+usage() {
+  cat <<'EOF' >&2
+Usage: agent-env-run [--home <dir>] [--repo <dir>] [--failsafe] [--untrusted] [--require-bwrap] [--rw-cwd] -- <command> [args...]
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --home)
+      HOME_OVERRIDE="${2:?--home requires a directory}"
+      shift 2
+      ;;
+    --repo)
+      REPO_ROOT="${2:?--repo requires a directory}"
+      shift 2
+      ;;
+    --failsafe)
+      FAILSAFE=1
+      shift
+      ;;
+    --untrusted)
+      UNTRUSTED=1
+      shift
+      ;;
+    --require-bwrap)
+      REQUIRE_BWRAP=1
+      shift
+      ;;
+    --rw-cwd)
+      RW_CWD=1
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      echo "agent-env-run: unknown option: $1" >&2
+      usage
+      exit 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [ "$#" -eq 0 ]; then
+  usage
+  exit 2
+fi
+
+TARGET_HOME="${HOME_OVERRIDE:-${AGENTCFG_HOME:-$HOME}}"
+mkdir -p -m 0700 "$TARGET_HOME"
+chmod 0700 "$TARGET_HOME"
+
+# Tier 1 volatile runtime dir (tmpfs)
+RUNTIME_BASE="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [ -d "$RUNTIME_BASE" ] && [ -w "$RUNTIME_BASE" ]; then
+  export XDG_RUNTIME_DIR="$RUNTIME_BASE"
+  install -d -m 0700 "$XDG_RUNTIME_DIR/agent-runtime"
+else
+  mkdir -p -m 0700 "$TARGET_HOME/.local/state/agentcfg/runtime"
+  export XDG_RUNTIME_DIR="$TARGET_HOME/.local/state/agentcfg/runtime"
+fi
+
+# Tier 2 private scratch dirs (ext4)
+install -d -m 0700 "$TARGET_HOME/.local/tmp" "$TARGET_HOME/.local/tmp/claude"
+SESSION_TMP="$(mktemp -d -p "$TARGET_HOME/.local/tmp" "agent.XXXXXX")"
+chmod 0700 "$SESSION_TMP"
+
+cleanup() {
+  rm -rf -- "$SESSION_TMP"
+}
+trap cleanup EXIT INT TERM
+
+export TMPDIR="$SESSION_TMP"
+export TEMP="$SESSION_TMP"
+export TMP="$SESSION_TMP"
+export CLAUDE_CODE_TMPDIR="$TARGET_HOME/.local/tmp/claude"
+
+CMD=("$@")
+BIN_NAME="$(basename -- "${CMD[0]}")"
+
+has_info_flag() {
+  local arg
+  for arg in "${CMD[@]:1}"; do
+    case "$arg" in
+      --version|-V|--help|-h|version|doctor)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+if [ "$FAILSAFE" -eq 1 ]; then
+  FS_ROOT="$SESSION_TMP/failsafe-root"
+  install -d -m 0700 \
+    "$FS_ROOT/codex" \
+    "$FS_ROOT/claude" \
+    "$FS_ROOT/gemini/policies" \
+    "$FS_ROOT/antigravity" \
+    "$FS_ROOT/copilot" \
+    "$FS_ROOT/kimi-code" \
+    "$FS_ROOT/grok" \
+    "$FS_ROOT/opencode/config" \
+    "$FS_ROOT/cursor" \
+    "$FS_ROOT/cline/data" \
+    "$FS_ROOT/goose" \
+    "$FS_ROOT/home"
+
+  # Seed isolated failsafe configs when templates exist in repo.
+  FS_CAT="$REPO_ROOT/canonical/profiles/failsafe"
+  [ -f "$FS_CAT/codex/failsafe.config.toml" ] && cp "$FS_CAT/codex/failsafe.config.toml" "$FS_ROOT/codex/config.toml"
+  [ -f "$FS_CAT/claude/settings.json" ] && cp "$FS_CAT/claude/settings.json" "$FS_ROOT/claude/settings.json"
+  [ -f "$FS_CAT/gemini/settings.json" ] && cp "$FS_CAT/gemini/settings.json" "$FS_ROOT/gemini/settings.json"
+  [ -f "$FS_CAT/gemini/policies/failsafe.toml" ] && cp "$FS_CAT/gemini/policies/failsafe.toml" "$FS_ROOT/gemini/policies/failsafe.toml"
+
+  export CODEX_HOME="$FS_ROOT/codex"
+  export CODEX_SQLITE_HOME="$FS_ROOT/codex"
+  export CLAUDE_CONFIG_DIR="$FS_ROOT/claude"
+  export CLAUDE_CODE_SAFE_MODE=1
+  export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+  export DISABLE_AUTOUPDATER=1
+  export GEMINI_CLI_HOME="$FS_ROOT/gemini"
+  export ANTIGRAVITY_APP_DATA_DIR="$FS_ROOT/antigravity"
+  export COPILOT_HOME="$FS_ROOT/copilot"
+  export COPILOT_AUTO_UPDATE=false
+  export COP_AUTO_UPDATE=false
+  export KIMI_CODE_HOME="$FS_ROOT/kimi-code"
+  export KIMI_DISABLE_CRON=1
+  export KIMI_CODE_WATCH=false
+  export GROK_HOME="$FS_ROOT/grok"
+  export GROK_MEMORY=0
+  export GROK_DISABLE_AUTOUPDATER=1
+  export GROK_CURSOR_MCPS=0
+  export GROK_CLAUDE_MCPS=0
+  export OPENCODE_TEST_HOME="$FS_ROOT/opencode"
+  export OPENCODE_CONFIG_DIR="$FS_ROOT/opencode/config"
+  export OPENCODE_DB=":memory:"
+  export OPENCODE_DISABLE_PROJECT_CONFIG=1
+  export CURSOR_CONFIG_DIR="$FS_ROOT/cursor"
+  export CLINE_DIR="$FS_ROOT/cline"
+  export CLINE_DATA_DIR="$FS_ROOT/cline/data"
+  export GOOSE_PATH_ROOT="$FS_ROOT/goose"
+
+  if ! has_info_flag; then
+    case "$BIN_NAME" in
+      claude)
+        CMD=("${CMD[0]}" --safe-mode "${CMD[@]:1}")
+        ;;
+      codex)
+        CMD=("${CMD[0]}" --ask-for-approval on-request --sandbox read-only "${CMD[@]:1}")
+        ;;
+      gemini)
+        CMD=("${CMD[0]}" --approval-mode plan --sandbox "${CMD[@]:1}")
+        ;;
+      agy)
+        CMD=("${CMD[0]}" --mode plan --sandbox --disable-slash-commands "${CMD[@]:1}")
+        ;;
+      copilot)
+        CMD=("${CMD[0]}" --disable-builtin-mcps --no-custom-instructions --no-auto-update "${CMD[@]:1}")
+        ;;
+      grok)
+        CMD=("${CMD[0]}" --no-memory --no-plan --no-subagents "${CMD[@]:1}")
+        ;;
+      opencode)
+        CMD=("${CMD[0]}" --standalone "${CMD[@]:1}")
+        ;;
+      aider)
+        CMD=("${CMD[0]}" --no-check-update --no-restore-chat-history "${CMD[@]:1}")
+        ;;
+    esac
+  fi
+fi
+
+if [ "$UNTRUSTED" -eq 1 ]; then
+  ISO_HOME="$SESSION_TMP/untrusted-home"
+  install -d -m 0700 "$ISO_HOME"
+  unset DBUS_SESSION_BUS_ADDRESS || true
+
+  ENV_KEEP=(
+    HOME="$ISO_HOME"
+    PATH="$PATH"
+    TERM="${TERM:-xterm-256color}"
+    LANG="${LANG:-C.UTF-8}"
+    TMPDIR="$SESSION_TMP"
+    TEMP="$SESSION_TMP"
+    TMP="$SESSION_TMP"
+    CLAUDE_CODE_TMPDIR="$CLAUDE_CODE_TMPDIR"
+    XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR"
+  )
+  if [ "$FAILSAFE" -eq 1 ]; then
+    ENV_KEEP+=(
+      CODEX_HOME="$CODEX_HOME"
+      CODEX_SQLITE_HOME="$CODEX_SQLITE_HOME"
+      CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR"
+      CLAUDE_CODE_SAFE_MODE="$CLAUDE_CODE_SAFE_MODE"
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY="$CLAUDE_CODE_DISABLE_AUTO_MEMORY"
+      DISABLE_AUTOUPDATER="$DISABLE_AUTOUPDATER"
+      GEMINI_CLI_HOME="$GEMINI_CLI_HOME"
+      ANTIGRAVITY_APP_DATA_DIR="$ANTIGRAVITY_APP_DATA_DIR"
+      COPILOT_HOME="$COPILOT_HOME"
+      COPILOT_AUTO_UPDATE="$COPILOT_AUTO_UPDATE"
+      COP_AUTO_UPDATE="$COP_AUTO_UPDATE"
+      KIMI_CODE_HOME="$KIMI_CODE_HOME"
+      KIMI_DISABLE_CRON="$KIMI_DISABLE_CRON"
+      KIMI_CODE_WATCH="$KIMI_CODE_WATCH"
+      GROK_HOME="$GROK_HOME"
+      GROK_MEMORY="$GROK_MEMORY"
+      GROK_DISABLE_AUTOUPDATER="$GROK_DISABLE_AUTOUPDATER"
+      GROK_CURSOR_MCPS="$GROK_CURSOR_MCPS"
+      GROK_CLAUDE_MCPS="$GROK_CLAUDE_MCPS"
+      OPENCODE_TEST_HOME="$OPENCODE_TEST_HOME"
+      OPENCODE_CONFIG_DIR="$OPENCODE_CONFIG_DIR"
+      OPENCODE_DB="$OPENCODE_DB"
+      OPENCODE_DISABLE_PROJECT_CONFIG="$OPENCODE_DISABLE_PROJECT_CONFIG"
+      CURSOR_CONFIG_DIR="$CURSOR_CONFIG_DIR"
+      CLINE_DIR="$CLINE_DIR"
+      CLINE_DATA_DIR="$CLINE_DATA_DIR"
+      GOOSE_PATH_ROOT="$GOOSE_PATH_ROOT"
+    )
+  fi
+
+  if command -v bwrap >/dev/null 2>&1 && bwrap --ro-bind / / --dev /dev --proc /proc -- true >/dev/null 2>&1; then
+    CWD_PATH="$(pwd)"
+    BWRAP_ARGS=(
+      --unshare-user
+      --die-with-parent
+      --clearenv
+      --ro-bind / /
+      --dev /dev
+      --proc /proc
+      --tmpfs /tmp
+      --tmpfs /dev/shm
+      --bind "$ISO_HOME" "$TARGET_HOME"
+      --bind "$SESSION_TMP" "$SESSION_TMP"
+    )
+    if [ "$RW_CWD" -eq 1 ]; then
+      BWRAP_ARGS+=(--bind "$CWD_PATH" "$CWD_PATH")
+    else
+      BWRAP_ARGS+=(--ro-bind "$CWD_PATH" "$CWD_PATH")
+    fi
+    for kv in "${ENV_KEEP[@]}"; do
+      k="${kv%%=*}"
+      v="${kv#*=}"
+      [ "$k" = "HOME" ] && v="$TARGET_HOME"
+      BWRAP_ARGS+=(--setenv "$k" "$v")
+    done
+    bwrap "${BWRAP_ARGS[@]}" -- "${CMD[@]}"
+    exit $?
+  else
+    if [ "$REQUIRE_BWRAP" -eq 1 ]; then
+      echo "agent-env-run: bwrap sandbox required (--require-bwrap) but unavailable/blocked on this host" >&2
+      exit 1
+    fi
+    echo "agent-env-run: [warn] bwrap userns unavailable on host; falling back to isolated HOME + env scrub" >&2
+    env -i "${ENV_KEEP[@]}" "${CMD[@]}"
+    exit $?
+  fi
+fi
+
+# Run directly (not exec) so trap cleans up SESSION_TMP reliably on exit.
+export HOME="$TARGET_HOME"
+"${CMD[@]}"

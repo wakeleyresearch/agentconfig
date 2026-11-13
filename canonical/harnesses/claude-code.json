@@ -1,0 +1,38 @@
+{
+  "harness": "claude-code",
+  "mcp_schema": "mcpServers",
+  "mcp_format": "json",
+  "http_transport_style": "type_http_url",
+  "env_syntax": "${VAR}",
+  "supports_sse": true,
+  "rules_target": "~/.claude/CLAUDE.md",
+  "home_env_var": "CLAUDE_CONFIG_DIR",
+  "failsafe_flags": [
+    "--safe-mode",
+    "--strict-mcp-config",
+    "--mcp-config",
+    "/dev/null",
+    "--permission-mode",
+    "plan",
+    "--setting-sources",
+    "user"
+  ],
+  "base_settings": {
+    "enableAllProjectMcpServers": false,
+    "autoMemoryEnabled": false,
+    "permissions": {
+      "deny": [
+        "Read(~/.ssh/**)",
+        "Read(~/.config/gh/**)",
+        "Read(~/.gemini/antigravity-cli/antigravity-oauth-token)",
+        "Read(~/.aws/**)"
+      ]
+    }
+  },
+  "managed_keys": [
+    "enableAllProjectMcpServers",
+    "autoMemoryEnabled",
+    "permissions.deny"
+  ],
+  "removed_keys": []
+}

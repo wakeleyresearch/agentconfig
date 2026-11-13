@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "servers": {
+    "git-ro": {
+      "runtime": "python-venv",
+      "venv_path": "~/.local/share/agentconfig/mcp-venvs/git-ro",
+      "package": "mcp-server-git",
+      "version": "2025.9.25",
+      "package_sha256": null,
+      "oci_image": null,
+      "tools_list_sha256": null,
+      "pinned_at": "2026-11-13T00:00:00Z",
+      "status": "template"
+    },
+    "github-remote": {
+      "runtime": "streamable-http",
+      "venv_path": null,
+      "package": null,
+      "version": "pinned-https",
+      "package_sha256": null,
+      "oci_image": null,
+      "tools_list_sha256": null,
+      "pinned_at": "2026-11-13T00:00:00Z",
+      "status": "template"
+    },
+    "sqlite-oci": {
+      "runtime": "oci",
+      "venv_path": null,
+      "package": "ghcr.io/example/mcp-sqlite",
+      "version": "pinned-digest",
+      "package_sha256": null,
+      "oci_image": "ghcr.io/example/mcp-sqlite@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "tools_list_sha256": null,
+      "pinned_at": "2026-11-13T00:00:00Z",
+      "status": "template"
+    }
+  }
+}

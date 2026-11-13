@@ -1,0 +1,27 @@
+{
+  "harness": "kimi-code",
+  "mcp_schema": "mcpServers",
+  "mcp_format": "json",
+  "http_transport_style": "url",
+  "env_syntax": "bearerTokenEnvVar",
+  "supports_sse": true,
+  "rules_target": "~/.kimi-code/AGENTS.md",
+  "home_env_var": "KIMI_CODE_HOME",
+  "failsafe_flags": [
+    "--skills-dir",
+    "/dev/null"
+  ],
+  "base_settings": {
+    "workspace": {
+      "require_trust": true
+    },
+    "permission": {
+      "dangerous_command_guard": true
+    }
+  },
+  "managed_keys": [
+    "workspace.require_trust",
+    "permission.dangerous_command_guard"
+  ],
+  "removed_keys": []
+}

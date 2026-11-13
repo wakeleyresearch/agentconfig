@@ -1,0 +1,5 @@
+[workspace]
+require_trust = true
+
+[permission]
+dangerous_command_guard = true

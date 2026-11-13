@@ -1,0 +1,14 @@
+approval_policy = "on-request"
+sandbox_mode = "read-only"
+check_for_update_on_startup = false
+
+[features]
+memories = false
+hooks = false
+
+[memories]
+generate_memories = false
+use_memories = false
+disable_on_external_context = true
+
+[mcp_servers]

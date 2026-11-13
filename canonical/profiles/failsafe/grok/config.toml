@@ -1,0 +1,10 @@
+[memory]
+enabled = false
+
+[compat.claude]
+mcps = false
+
+[compat.cursor]
+mcps = false
+
+[mcp_servers]

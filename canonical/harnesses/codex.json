@@ -1,0 +1,43 @@
+{
+  "harness": "codex",
+  "mcp_schema": "mcp_servers",
+  "mcp_format": "toml",
+  "http_transport_style": "url",
+  "env_syntax": "bearer_token_env_var",
+  "supports_sse": false,
+  "rules_target": "~/.codex/AGENTS.md",
+  "home_env_var": "CODEX_HOME",
+  "failsafe_flags": [
+    "--ask-for-approval",
+    "on-request",
+    "--sandbox",
+    "read-only",
+    "--strict-config",
+    "--no-daemon"
+  ],
+  "base_settings": {
+    "approval_policy": "on-request",
+    "sandbox_mode": "read-only",
+    "check_for_update_on_startup": false,
+    "features": {
+      "memories": false
+    },
+    "memories": {
+      "generate_memories": false,
+      "use_memories": false,
+      "disable_on_external_context": true
+    }
+  },
+  "managed_keys": [
+    "approval_policy",
+    "sandbox_mode",
+    "check_for_update_on_startup",
+    "features.memories",
+    "memories",
+    "mcp_servers"
+  ],
+  "removed_keys": [
+    "profile",
+    "profiles"
+  ]
+}

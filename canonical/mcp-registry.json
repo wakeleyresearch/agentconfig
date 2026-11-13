@@ -1,0 +1,111 @@
+{
+  "schema_version": "1.0",
+  "servers": {
+    "git-ro": {
+      "enabled": false,
+      "description": "Local read-only Git MCP server in a pre-built locked Python venv",
+      "transport": "stdio",
+      "command": "~/.local/share/agentconfig/mcp-venvs/git-ro/bin/mcp-server-git",
+      "args": [
+        "--repository",
+        "."
+      ],
+      "cwd": null,
+      "url": null,
+      "headers": {},
+      "bearer_token_env_var": null,
+      "env": {},
+      "secret_refs": [],
+      "wrap_with_secret_exec": false,
+      "unshare_net": true,
+      "timeout_ms": 10000,
+      "tool_timeout_ms": 30000,
+      "enabled_tools": [],
+      "disabled_tools": [],
+      "targets": [
+        "antigravity",
+        "gemini-cli",
+        "codex",
+        "claude-code",
+        "copilot",
+        "kimi-code",
+        "grok",
+        "opencode",
+        "cursor",
+        "devin",
+        "cline",
+        "goose"
+      ]
+    },
+    "github-remote": {
+      "enabled": false,
+      "description": "Pinned HTTPS Streamable HTTP MCP server using symbolic secret_ref",
+      "transport": "streamable_http",
+      "command": null,
+      "args": [],
+      "cwd": null,
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {},
+      "bearer_token_env_var": "GITHUB_MCP_TOKEN",
+      "env": {},
+      "secret_refs": [
+        {
+          "env_var": "GITHUB_MCP_TOKEN",
+          "secret_ref": "agentconfig/github_mcp_pat"
+        }
+      ],
+      "wrap_with_secret_exec": false,
+      "unshare_net": false,
+      "timeout_ms": 10000,
+      "tool_timeout_ms": 30000,
+      "enabled_tools": [],
+      "disabled_tools": [],
+      "targets": [
+        "antigravity",
+        "gemini-cli",
+        "codex",
+        "claude-code",
+        "copilot",
+        "kimi-code",
+        "grok",
+        "opencode",
+        "cursor",
+        "devin",
+        "cline",
+        "goose"
+      ]
+    },
+    "sqlite-oci": {
+      "enabled": false,
+      "description": "Digest-pinned OCI container MCP server with read-only root and no network",
+      "transport": "stdio",
+      "command": "podman",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "--network=none",
+        "--read-only",
+        "ghcr.io/example/mcp-sqlite@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      ],
+      "cwd": null,
+      "url": null,
+      "headers": {},
+      "bearer_token_env_var": null,
+      "env": {},
+      "secret_refs": [],
+      "wrap_with_secret_exec": false,
+      "unshare_net": true,
+      "timeout_ms": 10000,
+      "tool_timeout_ms": 30000,
+      "enabled_tools": [],
+      "disabled_tools": [],
+      "targets": [
+        "codex",
+        "claude-code",
+        "gemini-cli",
+        "opencode"
+      ]
+    }
+  }
+}
