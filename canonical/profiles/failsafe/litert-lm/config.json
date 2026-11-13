@@ -1,0 +1,13 @@
+{
+  "host": "127.0.0.1",
+  "port": 8080,
+  "telemetry": false,
+  "default_model": "gemma-4-E4B-it",
+  "model": "gemma-4-E4B-it",
+  "tool_router": "functiongemma-270m-it",
+  "tool_router_model": "functiongemma-270m-it",
+  "safety_classifier": "shieldgemma-2-4b-it",
+  "safety_classifier_model": "shieldgemma-2-4b-it",
+  "max_context_tokens": 32768,
+  "allow_remote": false
+}

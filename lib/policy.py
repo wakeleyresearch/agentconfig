@@ -79,6 +79,19 @@ DEFAULT_POLICY: dict[str, Any] = {
             "XAI_BASE_URL": ["https://api.x.ai"],
         },
     },
+    "local_model_loopback": {
+        "enabled": True,
+        "allowed_providers": ["ollama", "litert-lm", "gemma"],
+        "allowed_hosts": ["127.0.0.1", "localhost"],
+        "allowed_ports": [11434, 8080],
+        "allowed_origins": [
+            "http://127.0.0.1:11434",
+            "http://localhost:11434",
+            "http://127.0.0.1:8080",
+            "http://localhost:8080",
+        ],
+        "banned_hosts": ["0.0.0.0", "::", "*"],
+    },
     "unicode": {
         "ban_invisible_ranges": [
             ["0x200B", "0x200F"],
@@ -377,6 +390,323 @@ def run_gitleaks_staged(repo_root: Path) -> list[Finding]:
     return [Finding(severity="error", code="GITLEAKS_STAGED", path="<staged>", message=msg)]
 
 
+def check_local_model_endpoint(
+    url_val: str,
+    provider: str = "ollama",
+    policy: dict[str, Any] | None = None,
+    location: str = "",
+    allow_portless_origin: bool = False,
+) -> list[Finding]:
+    """Validate a local-model loopback URL or host:port against local_model_loopback policy."""
+    findings: list[Finding] = []
+    pol = policy or DEFAULT_POLICY
+    lm_cfg = pol.get("local_model_loopback", DEFAULT_POLICY["local_model_loopback"])
+    if not lm_cfg.get("enabled", True):
+        findings.append(
+            Finding(
+                severity="error",
+                code="LOCAL_MODEL_LOOPBACK_DISABLED",
+                path=location,
+                message=f"Local model loopback policy disabled for {url_val!r}",
+            )
+        )
+        return findings
+
+    allowed_providers = {str(p).strip().lower() for p in lm_cfg.get("allowed_providers", ["ollama", "litert-lm", "gemma"])}
+    allowed_providers.add("litert")
+    allowed_hosts = {str(h).strip().lower() for h in lm_cfg.get("allowed_hosts", ["127.0.0.1", "localhost"])}
+    allowed_ports = {int(p) for p in lm_cfg.get("allowed_ports", [11434, 8080])}
+    banned_hosts = {str(b).strip().lower() for b in lm_cfg.get("banned_hosts", ["0.0.0.0", "::", "*"])}
+
+    norm_provider = provider.strip().lower()
+    if norm_provider not in allowed_providers:
+        findings.append(
+            Finding(
+                severity="error",
+                code="UNAUTHORIZED_LOCAL_MODEL_PROVIDER",
+                path=location,
+                message=f"Local HTTP loopback is not allowed for provider {provider!r}: {url_val!r}",
+            )
+        )
+        return findings
+
+    raw = url_val.strip()
+    if not raw:
+        findings.append(
+            Finding(
+                severity="error",
+                code="EMPTY_LOCAL_MODEL_URL",
+                path=location,
+                message="Empty local model endpoint URL",
+            )
+        )
+        return findings
+
+    if "://" in raw:
+        parsed = urlparse(raw)
+        scheme = (parsed.scheme or "").lower()
+        host = (parsed.hostname or "").lower()
+        try:
+            port = parsed.port
+        except ValueError:
+            findings.append(
+                Finding(
+                    severity="error",
+                    code="INVALID_LOCAL_MODEL_URL",
+                    path=location,
+                    message=f"Invalid port in local model URL: {url_val!r}",
+                )
+            )
+            return findings
+        if scheme not in ("http", "https"):
+            findings.append(
+                Finding(
+                    severity="error",
+                    code="INVALID_LOCAL_MODEL_SCHEME",
+                    path=location,
+                    message=f"Unsupported scheme {scheme!r} for local model URL: {url_val!r}",
+                )
+            )
+            return findings
+        if parsed.username or parsed.password:
+            findings.append(
+                Finding(
+                    severity="error",
+                    code="URL_USERINFO_CREDENTIAL",
+                    path=location,
+                    message=f"Credentials in local model URL userinfo are forbidden: {url_val!r}",
+                )
+            )
+    else:
+        # Handle bare host or host:port (e.g. OLLAMA_HOST=127.0.0.1:11434)
+        host_part, sep, port_part = raw.rpartition(":")
+        if sep and port_part.isdigit():
+            host = host_part.strip("[]").lower()
+            port = int(port_part)
+        else:
+            host = raw.strip("[]").lower()
+            port = None
+
+    if host in banned_hosts or raw.lower().startswith(("http://0.0.0.0", "https://0.0.0.0", "0.0.0.0")):
+        findings.append(
+            Finding(
+                severity="error",
+                code="INSECURE_LOCAL_MODEL_BIND",
+                path=location,
+                message=f"Wildcard bind {raw!r} is forbidden for local model provider {provider!r}",
+            )
+        )
+        return findings
+
+    if host not in allowed_hosts:
+        findings.append(
+            Finding(
+                severity="error",
+                code="UNAUTHORIZED_LOCAL_MODEL_URL",
+                path=location,
+                message=f"Non-loopback host {host!r} is forbidden for local model provider {provider!r}: {url_val!r}",
+            )
+        )
+        return findings
+
+    if port is None:
+        if not allow_portless_origin:
+            findings.append(
+                Finding(
+                    severity="error",
+                    code="UNAUTHORIZED_LOCAL_MODEL_PORT",
+                    path=location,
+                    message=f"Explicit loopback port ({sorted(allowed_ports)}) required for local model URL: {url_val!r}",
+                )
+            )
+    elif port not in allowed_ports:
+        findings.append(
+            Finding(
+                severity="error",
+                code="UNAUTHORIZED_LOCAL_MODEL_PORT",
+                path=location,
+                message=f"Port {port} not in allowed local model ports {sorted(allowed_ports)}: {url_val!r}",
+            )
+        )
+
+    return findings
+
+
+validate_local_model_url = check_local_model_endpoint
+
+
+def is_allowed_local_model_url(
+    url_val: str,
+    provider: str = "ollama",
+    policy: dict[str, Any] | None = None,
+) -> bool:
+    """Return True iff url_val is an allowed loopback endpoint for provider."""
+    return len(check_local_model_endpoint(url_val, provider=provider, policy=policy)) == 0
+
+
+def check_local_model_config(
+    data: dict[str, Any],
+    harness: str = "",
+    policy: dict[str, Any] | None = None,
+    location: str = "",
+) -> list[Finding]:
+    """Validate local-model provider configurations across Codex, OpenCode, Gemini CLI, Goose, LiteRT-LM, and Ollama."""
+    findings: list[Finding] = []
+    pol = policy or DEFAULT_POLICY
+    norm_h = _normalize_harness(harness) if harness else ""
+
+    # 1. Codex [model_providers.<name>]
+    model_providers = data.get("model_providers")
+    if isinstance(model_providers, dict):
+        for prov_name, prov_cfg in model_providers.items():
+            if not isinstance(prov_cfg, dict):
+                continue
+            burl = prov_cfg.get("base_url") or prov_cfg.get("url")
+            if isinstance(burl, str) and burl.strip():
+                findings.extend(
+                    check_local_model_endpoint(
+                        burl.strip(),
+                        provider=str(prov_name),
+                        policy=pol,
+                        location=f"{location}#model_providers.{prov_name}",
+                    )
+                )
+
+    # 2. OpenCode V2 provider.<name>
+    oc_providers = data.get("provider")
+    if isinstance(oc_providers, dict):
+        for prov_name, prov_cfg in oc_providers.items():
+            if not isinstance(prov_cfg, dict):
+                continue
+            urls_to_check: list[str] = []
+            for k in ("base_url", "baseURL", "url"):
+                if isinstance(prov_cfg.get(k), str) and prov_cfg[k].strip():
+                    urls_to_check.append(prov_cfg[k].strip())
+            opts = prov_cfg.get("options")
+            if isinstance(opts, dict):
+                for k in ("baseURL", "base_url", "url"):
+                    if isinstance(opts.get(k), str) and opts[k].strip():
+                        urls_to_check.append(opts[k].strip())
+            for u in urls_to_check:
+                findings.extend(
+                    check_local_model_endpoint(
+                        u,
+                        provider=str(prov_name),
+                        policy=pol,
+                        location=f"{location}#provider.{prov_name}",
+                    )
+                )
+
+    # 3. Gemini CLI experimental.gemma
+    exp = data.get("experimental")
+    if isinstance(exp, dict) and isinstance(exp.get("gemma"), dict):
+        gemma_cfg = exp["gemma"]
+        runtime = str(gemma_cfg.get("runtime") or "litert-lm")
+        for k in ("endpoint", "base_url", "url"):
+            if isinstance(gemma_cfg.get(k), str) and gemma_cfg[k].strip():
+                findings.extend(
+                    check_local_model_endpoint(
+                        gemma_cfg[k].strip(),
+                        provider=runtime,
+                        policy=pol,
+                        location=f"{location}#experimental.gemma.{k}",
+                    )
+                )
+
+    # 4. LiteRT-LM config (either top-level or inside base_settings)
+    litert_blocks: list[dict[str, Any]] = []
+    if norm_h == "litert-lm":
+        if isinstance(data.get("base_settings"), dict):
+            litert_blocks.append(data["base_settings"])
+        else:
+            litert_blocks.append(data)
+    for lb in litert_blocks:
+        if lb.get("telemetry") is True:
+            findings.append(
+                Finding(
+                    severity="error",
+                    code="LITERT_TELEMETRY_ENABLED",
+                    path=location,
+                    message="LiteRT-LM telemetry=true is forbidden",
+                )
+            )
+        if lb.get("allow_remote") is True:
+            findings.append(
+                Finding(
+                    severity="error",
+                    code="LITERT_REMOTE_ENABLED",
+                    path=location,
+                    message="LiteRT-LM allow_remote=true is forbidden",
+                )
+            )
+        if "host" in lb:
+            h_val = str(lb["host"]).strip()
+            p_val = lb.get("port", 8080)
+            synth = h_val if "://" in h_val else f"http://{h_val}:{p_val}"
+            findings.extend(
+                check_local_model_endpoint(
+                    synth,
+                    provider="litert-lm",
+                    policy=pol,
+                    location=f"{location}#host",
+                )
+            )
+        for k in ("endpoint", "base_url", "url"):
+            if isinstance(lb.get(k), str) and lb[k].strip():
+                findings.extend(
+                    check_local_model_endpoint(
+                        lb[k].strip(),
+                        provider="litert-lm",
+                        policy=pol,
+                        location=f"{location}#{k}",
+                    )
+                )
+
+    # 5. Ollama / Goose env settings (either top-level or inside base_settings)
+    ollama_blocks: list[dict[str, Any]] = [data]
+    if isinstance(data.get("base_settings"), dict):
+        ollama_blocks.append(data["base_settings"])
+    for ob in ollama_blocks:
+        if "OLLAMA_HOST" in ob and ob["OLLAMA_HOST"] is not None:
+            findings.extend(
+                check_local_model_endpoint(
+                    str(ob["OLLAMA_HOST"]).strip(),
+                    provider="ollama",
+                    policy=pol,
+                    location=f"{location}#OLLAMA_HOST",
+                )
+            )
+        if "OLLAMA_ORIGINS" in ob and ob["OLLAMA_ORIGINS"] is not None:
+            for orig in str(ob["OLLAMA_ORIGINS"]).split(","):
+                orig_s = orig.strip()
+                if not orig_s:
+                    continue
+                findings.extend(
+                    check_local_model_endpoint(
+                        orig_s,
+                        provider="ollama",
+                        policy=pol,
+                        location=f"{location}#OLLAMA_ORIGINS",
+                        allow_portless_origin=True,
+                    )
+                )
+
+    # 6. Top-level base_url / endpoint / url when harness is ollama / litert-lm / gemma
+    if norm_h in ("ollama", "litert-lm", "gemma"):
+        for k in ("base_url", "baseURL", "endpoint", "url"):
+            if isinstance(data.get(k), str) and data[k].strip():
+                findings.extend(
+                    check_local_model_endpoint(
+                        data[k].strip(),
+                        provider=norm_h,
+                        policy=pol,
+                        location=f"{location}#{k}",
+                    )
+                )
+
+    return findings
+
+
 def _check_base_url_env(
     env_map: dict[str, Any],
     location: str,
@@ -394,7 +724,24 @@ def _check_base_url_env(
         val = str(raw_val) if raw_val is not None else ""
         if is_placeholder_value(val, policy):
             continue
-        if upper.endswith(suffixes):
+        if upper == "OLLAMA_HOST":
+            findings.extend(check_local_model_endpoint(val, provider="ollama", policy=policy, location=f"{location}:{var_name}"))
+        elif upper == "OLLAMA_ORIGINS":
+            for orig in val.split(","):
+                if orig.strip():
+                    findings.extend(
+                        check_local_model_endpoint(
+                            orig.strip(),
+                            provider="ollama",
+                            policy=policy,
+                            location=f"{location}:{var_name}",
+                            allow_portless_origin=True,
+                        )
+                    )
+        elif upper.startswith(("OLLAMA_", "LITERT_LM_", "LITERT_", "GEMMA_")) and upper.endswith(suffixes):
+            prov = "ollama" if upper.startswith("OLLAMA_") else ("gemma" if upper.startswith("GEMMA_") else "litert-lm")
+            findings.extend(check_local_model_endpoint(val, provider=prov, policy=policy, location=f"{location}:{var_name}"))
+        elif upper.endswith(suffixes):
             allowed_prefixes = allowed.get(upper, [])
             if not allowed_prefixes or not any(val.startswith(prefix) for prefix in allowed_prefixes):
                 findings.append(
@@ -425,8 +772,12 @@ def _check_url(
     parsed = urlparse(url_val)
     scheme = parsed.scheme.lower()
     host = (parsed.hostname or "").lower()
+    norm_harness = _normalize_harness(harness)
 
-    if scheme == "http":
+    if norm_harness in ("ollama", "litert-lm", "gemma"):
+        lm_findings = check_local_model_endpoint(url_val, provider=norm_harness, policy=policy, location=location)
+        findings.extend(lm_findings)
+    elif scheme == "http":
         if not (allow_localhost and host in ("localhost", "127.0.0.1", "::1")):
             findings.append(
                 Finding(
@@ -451,7 +802,6 @@ def _check_url(
         or parsed.path.lower().endswith("/sse")
         or "/sse/" in parsed.path.lower()
     )
-    norm_harness = _normalize_harness(harness)
     if is_sse and norm_harness in sse_disallowed:
         findings.append(
             Finding(
@@ -472,6 +822,9 @@ def _normalize_harness(harness: str) -> str:
         "kimi-code": "kimi",
         "xai-grok": "grok",
         "grok-build": "grok",
+        "litert": "litert-lm",
+        "litert-lm": "litert-lm",
+        "ollama": "ollama",
     }
     return aliases.get(h, h)
 
@@ -638,6 +991,7 @@ def check_mcp_config_object(
         for srv_name, srv_cfg in block.items():
             if isinstance(srv_cfg, dict):
                 findings.extend(check_mcp_server_entry(str(srv_name), srv_cfg, harness, policy, location))
+    findings.extend(check_local_model_config(data, harness, policy, location))
     return findings
 
 
@@ -657,7 +1011,21 @@ def check_codex_config(data: dict[str, Any], policy: dict[str, Any], location: s
             )
     ap = data.get("approval_policy")
     banned_ap = {str(x).lower() for x in codex_cfg.get("banned_approval_policies", ["untrusted"])}
-    if isinstance(ap, str) and ap.lower() in banned_ap:
+    lm_providers = {
+        str(p).lower()
+        for p in policy.get("local_model_loopback", DEFAULT_POLICY["local_model_loopback"]).get(
+            "allowed_providers", ["ollama", "litert-lm", "gemma"]
+        )
+    }
+    is_local_model_profile = (
+        "local-gemma" in location.lower()
+        or (
+            str(data.get("model_provider") or "").strip().lower() in lm_providers
+            and "profile" not in data
+            and "profiles" not in data
+        )
+    )
+    if isinstance(ap, str) and ap.lower() in banned_ap and not is_local_model_profile:
         findings.append(
             Finding(
                 severity="error",
@@ -902,6 +1270,9 @@ def _infer_harness_from_path(rel_path: str) -> str:
     lower = rel_path.lower()
     for candidate in (
         "antigravity",
+        "litert-lm",
+        "litert",
+        "ollama",
         "gemini",
         "codex",
         "claude",
@@ -916,7 +1287,7 @@ def _infer_harness_from_path(rel_path: str) -> str:
         "aider",
     ):
         if candidate in lower:
-            return candidate
+            return "litert-lm" if candidate == "litert" else candidate
     if "mcp-registry" in lower:
         return "registry"
     return "generic"
@@ -989,6 +1360,17 @@ def validate_content_file(
         if isinstance(data, dict):
             eff_harness = "goose" if "extensions" in data and harness == "generic" else harness
             report.findings.extend(check_mcp_config_object(data, eff_harness, policy, rel_path))
+        return
+
+    if suffix == ".env":
+        try:
+            data = parse_by_format(text, "env")
+        except FormatError as exc:
+            report.add("error", "INVALID_ENV", rel_path, str(exc))
+            return
+        if isinstance(data, dict):
+            report.findings.extend(_check_base_url_env(data, rel_path, policy))
+            report.findings.extend(check_local_model_config(data, harness, policy, rel_path))
         return
 
     if suffix in (".md", ".mdc"):
@@ -1181,7 +1563,7 @@ def validate_repo(
         try:
             tdoc = parse_json(targets_path.read_text(encoding="utf-8"))
             seen_ids: set[str] = set()
-            valid_strategies = {"ro", "patch-managed-keys", "plugin-bundle"}
+            valid_strategies = {"ro", "replace-owned", "patch-managed-keys", "plugin-bundle"}
             for t in tdoc.get("targets", []):
                 tid = t.get("id", "")
                 if not tid or tid in seen_ids:

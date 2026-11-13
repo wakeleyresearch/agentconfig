@@ -78,11 +78,125 @@ CONFIG_SCAN_ROOTS = (
     ".kimi-code",
     ".grok",
     ".config/opencode",
+    ".local/share/opencode",
     ".config/devin",
     ".config/goose",
     ".cursor",
     ".cline",
+    ".kilocode",
+    ".config/kilocode",
+    ".continue",
+    ".factory",
+    ".droid",
+    ".config/droid",
+    ".litert-lm",
+    ".config/litert-lm",
+    ".ollama",
+    ".config/ollama",
 )
+
+HARNESS_CONFIG_ROOTS: dict[str, tuple[str, ...]] = {
+    "antigravity": (".gemini/config", ".gemini/antigravity-cli", ".agents"),
+    "gemini-cli": (".gemini",),
+    "claude-code": (".claude", ".claude.json"),
+    "codex": (".codex",),
+    "opencode": (".config/opencode", ".local/share/opencode"),
+    "kilo": (".kilocode", ".config/kilocode"),
+    "cline": (".cline",),
+    "goose": (".config/goose",),
+    "aider": (".aider.conf.yml", ".aider"),
+    "continue": (".continue",),
+    "cursor": (".cursor",),
+    "copilot-cli": (".copilot", ".config/Code/User/mcp.json", ".config/github-copilot"),
+    "droid": (".factory", ".droid", ".config/droid"),
+    "litert-lm": (".litert-lm", ".config/litert-lm"),
+    "ollama": (".ollama", ".config/ollama"),
+    "kimi-code": (".kimi-code",),
+    "grok": (".grok",),
+    "devin": (".config/devin",),
+}
+
+HARNESS_RUNTIME_ROOTS: dict[str, tuple[str, ...]] = {
+    "antigravity": (".gemini/antigravity-cli", ".gemini/config", ".cache/antigravity"),
+    "gemini-cli": (".gemini",),
+    "claude-code": (".claude",),
+    "codex": (".codex",),
+    "opencode": (".config/opencode", ".local/share/opencode", ".cache/opencode"),
+    "kilo": (".kilocode", ".config/kilocode"),
+    "cline": (".cline",),
+    "goose": (".config/goose", ".local/share/goose"),
+    "aider": (".aider",),
+    "continue": (".continue",),
+    "cursor": (".cursor",),
+    "copilot-cli": (".copilot", ".config/github-copilot"),
+    "droid": (".factory", ".droid", ".config/droid"),
+    "litert-lm": (".litert-lm", ".cache/litert-lm"),
+    "ollama": (".ollama",),
+    "kimi-code": (".kimi-code",),
+    "grok": (".grok",),
+    "devin": (".config/devin",),
+}
+
+HARNESS_MEMORY_ROOTS: dict[str, tuple[str, ...]] = {
+    "antigravity": (".gemini/antigravity-cli/annotations", ".gemini/antigravity-cli/implicit"),
+    "gemini-cli": (".gemini/GEMINI.md", ".gemini/memories"),
+    "claude-code": (".claude/projects", ".claude/memory"),
+    "codex": (".codex/memories", ".codex/memories_v2"),
+    "opencode": (".config/opencode/memory", ".local/share/opencode/memory"),
+    "kilo": (".kilocode/memory", ".kilocode/memory-bank"),
+    "cline": (".cline/memory-bank", ".cline/memory"),
+    "goose": (".config/goose/memory",),
+    "aider": (".aider/memory",),
+    "continue": (".continue/memory",),
+    "cursor": (".cursor/memory",),
+    "copilot-cli": (".copilot/memory",),
+    "droid": (".factory/memory", ".droid/memory"),
+    "litert-lm": (".litert-lm",),
+    "ollama": (".ollama",),
+    "kimi-code": (".kimi-code/memory",),
+    "grok": (".grok/memory",),
+    "devin": (".config/devin/memory",),
+}
+
+_CLEANSE_HARNESS_ALIASES: dict[str, str] = {
+    "agy": "antigravity",
+    "gemini": "gemini-cli",
+    "claude": "claude-code",
+    "copilot": "copilot-cli",
+    "vscode": "copilot-cli",
+    "vscode-copilot": "copilot-cli",
+    "jetbrains": "copilot-cli",
+    "jetbrains-copilot": "copilot-cli",
+    "kimi": "kimi-code",
+    "kilocode": "kilo",
+    "factory": "droid",
+    "xai-grok": "grok",
+    "grok-build": "grok",
+    "grok-vibekit": "grok",
+}
+
+
+def resolve_cleanse_harnesses(
+    harnesses: set[str] | list[str] | tuple[str, ...] | None,
+) -> set[str] | None:
+    """Normalize optional harness names to HARNESS_*_ROOTS keys."""
+    if not harnesses:
+        return None
+    resolved: set[str] = set()
+    for raw in harnesses:
+        for part in str(raw).split(","):
+            h = part.strip().lower()
+            if not h:
+                continue
+            if h == "all":
+                return None
+            mapped = _CLEANSE_HARNESS_ALIASES.get(h, h)
+            if mapped not in HARNESS_CONFIG_ROOTS:
+                raise ValueError(
+                    f"Unknown cleanse harness {raw!r}; choose from {sorted(HARNESS_CONFIG_ROOTS)}"
+                )
+            resolved.add(mapped)
+    return resolved or None
 
 CONFIG_EXT_TO_FMT = {
     ".json": "json",
@@ -398,13 +512,21 @@ class QuarantineSession:
         if self.dry_run or not self.entries:
             return None
         ensure_safe_dir(self.quarantine_dir, mode=0o700, boundary_root=self.ctx.state_dir)
+        manifest_path = self.quarantine_dir / "quarantine-manifest.json"
+        combined_entries = list(self.entries)
+        if manifest_path.exists():
+            try:
+                prev_doc = parse_json(manifest_path.read_text(encoding="utf-8"))
+                if isinstance(prev_doc, dict) and isinstance(prev_doc.get("entries"), list):
+                    combined_entries = list(prev_doc["entries"]) + combined_entries
+            except (FormatError, OSError):
+                pass
         manifest = {
             "schema_version": "1.0",
             "scope": self.scope,
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "entries": self.entries,
+            "entries": combined_entries,
         }
-        manifest_path = self.quarantine_dir / "quarantine-manifest.json"
         atomic_write_text(
             manifest_path,
             dump_json(manifest),
@@ -431,33 +553,126 @@ def _load_deployed_ro_set(ctx: RuntimeContext) -> set[str]:
 
 def _infer_harness(p: Path) -> str:
     s = str(p).lower()
-    for h in ("antigravity", "gemini", "claude", "codex", "copilot", "kimi", "grok", "opencode", "cursor", "devin", "cline", "goose", "aider"):
+    for h in (
+        "antigravity",
+        "litert-lm",
+        "ollama",
+        "gemini",
+        "claude",
+        "codex",
+        "copilot",
+        "kimi",
+        "grok",
+        "opencode",
+        "kilo",
+        "cursor",
+        "devin",
+        "cline",
+        "goose",
+        "aider",
+        "continue",
+        "droid",
+        "factory",
+    ):
         if h in s:
-            return h
+            return "droid" if h == "factory" else h
     return "generic"
 
 
-def _cleanse_config(ctx: RuntimeContext, session: QuarantineSession, policy: dict[str, Any]) -> None:
+def _is_modelfile(p: Path) -> bool:
+    name_low = p.name.lower()
+    return name_low == "modelfile" or name_low.startswith("modelfile.") or name_low.endswith(".modelfile")
+
+
+def _check_symlink_escape_or_broken(
+    p: Path,
+    home_real: Path,
+    session: QuarantineSession,
+    item_scope: str,
+    is_dir_hint: bool = False,
+) -> bool:
+    """Return True if path is a symlink; quarantine broken symlinks or symlinks escaping HOME."""
+    if not (os.path.lexists(p) and p.is_symlink()):
+        return False
+    if not p.exists():
+        reason = "broken symlink directory" if is_dir_hint else "broken symlink"
+        session.quarantine_file(p, item_scope, reason)
+        return True
+    try:
+        resolved = p.resolve()
+        if not resolved.is_relative_to(home_real):
+            session.quarantine_file(p, item_scope, f"symlink escape outside HOME -> {resolved}")
+    except OSError:
+        session.quarantine_file(p, item_scope, "unresolvable symlink")
+    return True
+
+
+def _config_roots_for_harnesses(harnesses: set[str] | None) -> tuple[list[str], list[str]]:
+    if harnesses is None:
+        return list(CONFIG_SCAN_ROOTS), [".claude.json", ".aider.conf.yml"]
+    dir_roots: list[str] = []
+    single_files: list[str] = []
+    for h in sorted(harnesses):
+        for rel in HARNESS_CONFIG_ROOTS.get(h, ()):
+            if rel in (".claude.json", ".aider.conf.yml") or rel.endswith((".json", ".jsonc", ".toml", ".yaml", ".yml")):
+                if rel not in single_files:
+                    single_files.append(rel)
+            else:
+                if rel not in dir_roots:
+                    dir_roots.append(rel)
+    return dir_roots, single_files
+
+
+def _runtime_roots_for_harnesses(harnesses: set[str] | None) -> list[str]:
+    if harnesses is None:
+        roots = list(CONFIG_SCAN_ROOTS)
+        if ".cache/antigravity" not in roots:
+            roots.append(".cache/antigravity")
+        return roots
+    roots = []
+    for h in sorted(harnesses):
+        for rel in HARNESS_RUNTIME_ROOTS.get(h, ()):
+            if rel not in roots:
+                roots.append(rel)
+    return roots
+
+
+def _cleanse_config(
+    ctx: RuntimeContext,
+    session: QuarantineSession,
+    policy: dict[str, Any],
+    harnesses: set[str] | None = None,
+) -> None:
     ro_paths = _load_deployed_ro_set(ctx)
+    home_real = ctx.home_dir.resolve()
+    dir_roots, single_files = _config_roots_for_harnesses(harnesses)
+    skip_agy_in_gemini = harnesses is not None and "gemini-cli" in harnesses and "antigravity" not in harnesses
+
     candidates: list[Path] = []
-    for rel_root in CONFIG_SCAN_ROOTS:
+    for rel_root in dir_roots:
         root = ctx.home_dir / rel_root
         if os.path.lexists(root) and root.is_symlink() and not root.exists():
             session.quarantine_file(root, "config", "broken symlink directory")
             continue
         if not root.exists() or root.is_symlink():
             continue
+        if root.is_file():
+            candidates.append(root)
+            continue
         for cur, dirs, files in os.walk(root, followlinks=False):
             cur_p = Path(cur)
-            dirs[:] = sorted(d for d in dirs if d not in (".git", "node_modules", "conversations", "brain", "cache", "log", "logs", "crashes", "sessions", "worktrees"))
-            for d in dirs:
+            excluded = {".git", "node_modules", "conversations", "brain", "cache", "log", "logs", "crashes", "sessions", "worktrees"}
+            if skip_agy_in_gemini and cur_p == (ctx.home_dir / ".gemini"):
+                excluded.update({"antigravity-cli", "config"})
+            dirs[:] = sorted(d for d in dirs if d not in excluded)
+            for d in list(dirs):
                 dp = cur_p / d
-                if os.path.lexists(dp) and dp.is_symlink() and not dp.exists():
-                    session.quarantine_file(dp, "config", "broken symlink")
+                if _check_symlink_escape_or_broken(dp, home_real, session, "config", is_dir_hint=True):
+                    dirs.remove(d)
             for fn in sorted(files):
                 candidates.append(cur_p / fn)
 
-    for single in (".claude.json", ".aider.conf.yml"):
+    for single in single_files:
         sp = ctx.home_dir / single
         if os.path.lexists(sp):
             candidates.append(sp)
@@ -473,15 +688,16 @@ def _cleanse_config(ctx: RuntimeContext, session: QuarantineSession, policy: dic
         if os.path.lexists(p) and p.is_symlink():
             if not p.exists():
                 session.quarantine_file(p, "config", "broken symlink")
+            elif p.suffix.lower() not in (".md", ".mdc"):
+                _check_symlink_escape_or_broken(p, home_real, session, "config")
             continue
         if not p.is_file():
             continue
 
-        fmt = CONFIG_EXT_TO_FMT.get(p.suffix.lower())
-        if not fmt:
+        if p.suffix.lower() in (".pkl", ".pickle"):
+            session.quarantine_file(p, "config", "unverified pickle file")
             continue
 
-        # Ignore runtime-state files like installation_id or empty 0-byte agy placeholder mcp_config.json.
         st = os.lstat(p)
         mode = stat.S_IMODE(st.st_mode)
         abs_p = str(p)
@@ -494,6 +710,34 @@ def _cleanse_config(ctx: RuntimeContext, session: QuarantineSession, policy: dic
             if (mode & 0o002) != 0:
                 session.quarantine_file(p, "config", f"world-writable unsafe mode {mode:04o}")
                 continue
+
+        if _is_modelfile(p):
+            if not is_ro_target and (mode & 0o022) != 0:
+                session.warnings.append(f"{p}: permissive mode {mode:04o} -> 0600")
+                if not session.dry_run:
+                    os.chmod(p, 0o600)
+            try:
+                mf_text = p.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                session.quarantine_file(p, "config", "invalid UTF-8 in Modelfile")
+                continue
+            if scan_invisible_unicode(mf_text, str(p), policy):
+                session.quarantine_file(p, "config", "invisible Unicode injection in Modelfile")
+                continue
+            mf_poison = _line_is_poisoned(mf_text, policy)
+            if mf_poison:
+                session.quarantine_file(p, "config", f"poisoned Modelfile SYSTEM directive ({mf_poison})")
+                continue
+            mf_secrets = [f for f in scan_secrets(mf_text, str(p), policy) if f.severity == "error"]
+            if mf_secrets:
+                session.quarantine_file(p, "config", f"secret in Modelfile: {mf_secrets[0].code}")
+            continue
+
+        fmt = CONFIG_EXT_TO_FMT.get(p.suffix.lower())
+        if not fmt:
+            continue
+
+        if not is_ro_target:
             if (mode & 0o022) != 0 or (p.name in SENSITIVE_CONFIG_NAMES and (mode & 0o077) != 0):
                 session.warnings.append(f"{p}: permissive mode {mode:04o} -> 0600")
                 if not session.dry_run:
@@ -525,23 +769,32 @@ def _cleanse_config(ctx: RuntimeContext, session: QuarantineSession, policy: dic
                 findings.extend(check_codex_config(parsed, policy, str(p)))
             else:
                 findings.extend(check_mcp_config_object(parsed, harness, policy, str(p)))
-            if "hook" in p.name.lower():
+            if "hook" in p.name.lower() or "hooks" in parsed or "notify" in parsed:
                 findings.extend(check_hooks_config(parsed, policy, str(p)))
+                hook_blob = dump_json({"hooks": parsed.get("hooks"), "notify": parsed.get("notify")})
+                hook_poison = _line_is_poisoned(hook_blob, policy)
+                if hook_poison:
+                    session.quarantine_file(p, "config", f"rogue hook directive ({hook_poison})")
+                    continue
         findings.extend(scan_secrets(text, str(p), policy))
         errs = [f for f in findings if f.severity == "error"]
         if errs:
             session.quarantine_file(p, "config", f"policy violation: {errs[0].code} ({errs[0].message})")
 
 
-def _cleanse_runtime(ctx: RuntimeContext, session: QuarantineSession, policy: dict[str, Any]) -> None:
+def _cleanse_runtime(
+    ctx: RuntimeContext,
+    session: QuarantineSession,
+    policy: dict[str, Any],
+    harnesses: set[str] | None = None,
+) -> None:
     open_fds = _open_fd_targets_map()
+    home_real = ctx.home_dir.resolve()
     sqlite_targets: list[Path] = []
     wal_shm_files: list[Path] = []
+    skip_agy_in_gemini = harnesses is not None and "gemini-cli" in harnesses and "antigravity" not in harnesses
 
-    search_roots = [ctx.home_dir / r for r in CONFIG_SCAN_ROOTS]
-    cache_agy = ctx.home_dir / ".cache" / "antigravity"
-    if cache_agy.exists():
-        search_roots.append(cache_agy)
+    search_roots = [ctx.home_dir / r for r in _runtime_roots_for_harnesses(harnesses)]
 
     seen_files: set[Path] = set()
     for root in search_roots:
@@ -549,7 +802,14 @@ def _cleanse_runtime(ctx: RuntimeContext, session: QuarantineSession, policy: di
             continue
         for cur, dirs, files in os.walk(root, followlinks=False):
             cur_p = Path(cur)
-            dirs[:] = sorted(d for d in dirs if d not in (".git", "node_modules"))
+            excluded = {".git", "node_modules"}
+            if skip_agy_in_gemini and cur_p == (ctx.home_dir / ".gemini"):
+                excluded.update({"antigravity-cli", "config"})
+            dirs[:] = sorted(d for d in dirs if d not in excluded)
+            for d in list(dirs):
+                dp = cur_p / d
+                if _check_symlink_escape_or_broken(dp, home_real, session, "runtime", is_dir_hint=True):
+                    dirs.remove(d)
             for fn in sorted(files):
                 fp = cur_p / fn
                 if fp in seen_files:
@@ -566,6 +826,21 @@ def _cleanse_runtime(ctx: RuntimeContext, session: QuarantineSession, policy: di
                         session.quarantine_file(fp, "runtime", why)
                     continue
 
+                if _check_symlink_escape_or_broken(fp, home_real, session, "runtime"):
+                    continue
+
+                if fn.endswith((".pkl", ".pickle")):
+                    session.quarantine_file(fp, "runtime", "unverified pickle file")
+                    continue
+
+                try:
+                    st_mode = stat.S_IMODE(os.lstat(fp).st_mode)
+                    if (st_mode & 0o002) != 0:
+                        session.quarantine_file(fp, "runtime", f"world-writable runtime file/blob {st_mode:04o}")
+                        continue
+                except OSError:
+                    continue
+
                 if fn.endswith(".tmp") and not fn.startswith(".agentcfg."):
                     session.quarantine_file(fp, "runtime", "orphaned .tmp artifact")
                     continue
@@ -579,12 +854,13 @@ def _cleanse_runtime(ctx: RuntimeContext, session: QuarantineSession, policy: di
                 elif fn.endswith(("-wal", "-shm")):
                     wal_shm_files.append(fp)
 
-    # Check OPENCODE_DB if configured inside home_dir.
-    opencode_db = os.environ.get("OPENCODE_DB")
-    if opencode_db and opencode_db != ":memory:":
-        odb = Path(opencode_db)
-        if odb.exists() and odb not in seen_files:
-            sqlite_targets.append(odb)
+    # Check OPENCODE_DB if configured inside home_dir and opencode is in scope.
+    if harnesses is None or "opencode" in harnesses:
+        opencode_db = os.environ.get("OPENCODE_DB")
+        if opencode_db and opencode_db != ":memory:":
+            odb = Path(opencode_db)
+            if odb.exists() and odb not in seen_files:
+                sqlite_targets.append(odb)
 
     corrupt_dbs: set[Path] = set()
     for db in sqlite_targets:
@@ -669,37 +945,98 @@ def _line_is_poisoned(line: str, policy: dict[str, Any]) -> str | None:
     return None
 
 
+_HARNESS_MEMORY_GLOBS: dict[str, tuple[str, ...]] = {
+    "antigravity": (
+        ".gemini/antigravity-cli/annotations/*.pbtxt",
+        ".gemini/antigravity-cli/implicit/*.pb",
+    ),
+    "gemini-cli": (
+        ".gemini/memories/**/*.md",
+    ),
+    "claude-code": (
+        ".claude/projects/*/memory/*.md",
+        ".claude/memory/**/*.md",
+    ),
+    "codex": (
+        ".codex/memories/**/*.md",
+        ".codex/memories_v2/**/*.md",
+        ".codex/memories/extensions/skysight/**/*",
+    ),
+    "opencode": (
+        ".config/opencode/memory/**/*",
+        ".local/share/opencode/memory/**/*",
+    ),
+    "kilo": (
+        ".kilocode/memory/**/*",
+        ".kilocode/memory-bank/**/*",
+    ),
+    "cline": (
+        ".cline/memory-bank/*.md",
+        ".cline/memory/**/*.md",
+    ),
+    "goose": (
+        ".config/goose/memory/**/*",
+    ),
+    "aider": (
+        ".aider/memory/**/*",
+    ),
+    "continue": (
+        ".continue/memory/**/*",
+    ),
+    "cursor": (
+        ".cursor/memory/**/*",
+    ),
+    "copilot-cli": (
+        ".copilot/memory/**/*",
+    ),
+    "droid": (
+        ".factory/memory/**/*",
+        ".droid/memory/**/*",
+    ),
+    "litert-lm": (
+        ".litert-lm/**/Modelfile*",
+        ".litert-lm/**/*.modelfile",
+    ),
+    "ollama": (
+        ".ollama/**/Modelfile*",
+        ".ollama/**/*.modelfile",
+    ),
+    "kimi-code": (
+        ".kimi-code/memory/**/*",
+    ),
+    "grok": (
+        ".grok/memory/**/*",
+    ),
+    "devin": (
+        ".config/devin/memory/**/*",
+    ),
+}
+
+
 def _cleanse_memory(
     ctx: RuntimeContext,
     session: QuarantineSession,
     policy: dict[str, Any],
     native_wipe: bool = False,
+    harnesses: set[str] | None = None,
 ) -> None:
     memory_files: list[Path] = []
     gemini_md = ctx.home_dir / ".gemini" / "GEMINI.md"
-    if gemini_md.is_file() and not gemini_md.is_symlink():
+    if (harnesses is None or "gemini-cli" in harnesses) and gemini_md.is_file() and not gemini_md.is_symlink():
         memory_files.append(gemini_md)
 
-    glob_patterns = (
-        ".claude/projects/*/memory/*.md",
-        ".codex/memories/**/*.md",
-        ".codex/memories_v2/**/*.md",
-        ".codex/memories/extensions/skysight/**/*",
-        ".config/goose/memory/**/*",
-        ".gemini/antigravity-cli/annotations/*.pbtxt",
-        ".gemini/antigravity-cli/implicit/*.pb",
-        ".cline/memory-bank/*.md",
-    )
-    for pat in glob_patterns:
-        for p in sorted(ctx.home_dir.glob(pat)):
-            if p.is_file() and not p.is_symlink() and not is_auth_path(p, ctx.home_dir, policy):
-                memory_files.append(p)
+    active_harnesses = sorted(HARNESS_MEMORY_ROOTS.keys()) if harnesses is None else sorted(harnesses)
+    for h in active_harnesses:
+        for pat in _HARNESS_MEMORY_GLOBS.get(h, ()):
+            for p in sorted(ctx.home_dir.glob(pat)):
+                if p.is_file() and not p.is_symlink() and not is_auth_path(p, ctx.home_dir, policy):
+                    memory_files.append(p)
 
     # Deduplicate while preserving order.
     deduped: list[Path] = []
     seen: set[Path] = set()
     for f in memory_files:
-        if f not in seen:
+        if f not in seen and f.exists():
             seen.add(f)
             deduped.append(f)
 
@@ -754,18 +1091,22 @@ def _cleanse_memory(
                     atomic_write_text(f, "".join(clean_lines), mode=0o600, boundary_root=ctx.home_dir)
             continue
 
-        # Whole-file check for dedicated auto-memory files.
+        # Whole-file check for dedicated auto-memory files and Modelfiles.
         poison_reason = _line_is_poisoned(text, policy)
         if poison_reason:
-            session.quarantine_file(f, "memory", f"poisoned memory file ({poison_reason})")
+            label = "poisoned Modelfile SYSTEM directive" if _is_modelfile(f) else "poisoned memory file"
+            session.quarantine_file(f, "memory", f"{label} ({poison_reason})")
 
     if native_wipe and not session.dry_run:
         import subprocess
 
-        for cmd_argv in (
-            ["codex", "debug", "clear-memories"],
-            ["grok", "memory", "clear", "--all"],
-        ):
+        wipe_cmds: list[tuple[str, list[str]]] = [
+            ("codex", ["codex", "debug", "clear-memories"]),
+            ("grok", ["grok", "memory", "clear", "--all"]),
+        ]
+        for h_name, cmd_argv in wipe_cmds:
+            if harnesses is not None and h_name not in harnesses:
+                continue
             exe = shutil.which(cmd_argv[0])
             if exe:
                 subprocess.run([exe, *cmd_argv[1:]], check=False, capture_output=True, text=True)
@@ -775,15 +1116,17 @@ def _cleanse_memory(
 
 def run_cleanse(
     ctx: RuntimeContext,
-    scope: str = "config",
-    dry_run: bool = False,
+    scope: str = "all",
+    apply: bool = False,
+    harnesses: set[str] | list[str] | tuple[str, ...] | None = None,
+    dry_run: bool | None = None,
     auto_quarantine: bool = True,
     include_auth: bool = False,
     confirm_wipe_auth: bool = False,
     restore_targets: bool = True,
     native_wipe: bool = False,
 ) -> dict[str, Any]:
-    """Run cleanse across config, memory, runtime, or all scopes."""
+    """Run cleanse across config, memory, runtime, or all scopes (optionally scoped to harnesses)."""
     valid_scopes = {"config", "memory", "runtime", "all"}
     if scope not in valid_scopes:
         raise ValueError(f"Unsupported cleanse scope {scope!r}; choose from {sorted(valid_scopes)}")
@@ -791,8 +1134,13 @@ def run_cleanse(
     if include_auth and not confirm_wipe_auth:
         raise ValueError("--include-auth requires explicit --confirm-wipe-auth")
 
+    norm_harnesses = resolve_cleanse_harnesses(harnesses)
     policy = load_security_policy(ctx.repo_root)
-    effective_dry = dry_run or not auto_quarantine
+    if dry_run is not None:
+        effective_dry = bool(dry_run) or not auto_quarantine
+    else:
+        effective_dry = not bool(apply)
+
     session = QuarantineSession(
         ctx=ctx,
         scope=scope,
@@ -803,33 +1151,57 @@ def run_cleanse(
     )
 
     if scope in ("config", "all"):
-        _cleanse_config(ctx, session, policy)
+        _cleanse_config(ctx, session, policy, harnesses=norm_harnesses)
     if scope in ("runtime", "all"):
-        _cleanse_runtime(ctx, session, policy)
+        _cleanse_runtime(ctx, session, policy, harnesses=norm_harnesses)
     if scope in ("memory", "all"):
-        _cleanse_memory(ctx, session, policy, native_wipe=native_wipe)
+        _cleanse_memory(ctx, session, policy, native_wipe=native_wipe, harnesses=norm_harnesses)
 
     manifest_path = session.finalize()
 
-    # Re-render quarantined config targets cleanly from SoT if requested.
+    # Re-render quarantined config targets cleanly from SoT if requested and matched in targets.json.
     restored_ids: list[str] = []
     if not effective_dry and restore_targets and scope in ("config", "all") and session.quarantined_paths:
         from .deployer import apply_targets
+        from .paths import expand_target_path
+        from .render import load_targets_manifest
 
         quar_set = {os.path.abspath(p) for p in session.quarantined_paths}
-        res = apply_targets(
-            ctx,
-            safe=False,
-            approve_drift=True,
-            only_target_paths=quar_set,
-            run_pre_cleanse=False,
-        )
-        restored_ids = list(res.get("applied_ids", []))
+        has_matching_target = False
+        try:
+            for t in load_targets_manifest(ctx.repo_root):
+                if not t.get("enabled", True):
+                    continue
+                if t.get("scope", "global") == "project" and ctx.project_dir is None:
+                    continue
+                tp = os.path.abspath(
+                    expand_target_path(str(t["path"]), home_dir=ctx.home_dir, project_dir=ctx.project_dir)
+                )
+                if tp in quar_set or any(q.startswith(tp + "/") for q in quar_set):
+                    has_matching_target = True
+                    break
+        except Exception:
+            has_matching_target = False
+
+        if has_matching_target:
+            try:
+                res = apply_targets(
+                    ctx,
+                    safe=False,
+                    approve_drift=True,
+                    only_target_paths=quar_set,
+                    run_pre_cleanse=False,
+                )
+                restored_ids = list(res.get("applied_ids", []))
+            except Exception as exc:
+                session.warnings.append(f"Skipped automatic target re-render: {exc}")
 
     return {
         "ok": True,
         "scope": scope,
+        "applied": not effective_dry,
         "dry_run": effective_dry,
+        "harnesses": sorted(norm_harnesses) if norm_harnesses else None,
         "quarantine_manifest": str(manifest_path) if manifest_path else None,
         "quarantined": session.entries,
         "preserved_auth_or_live": session.preserved,

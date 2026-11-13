@@ -1,0 +1,42 @@
+{
+  "harness": "ollama",
+  "mcp_schema": "none",
+  "mcp_format": "none",
+  "http_transport_style": "none",
+  "env_syntax": "none",
+  "supports_sse": false,
+  "rules_target": null,
+  "home_env_var": "OLLAMA_MODELS",
+  "failsafe_flags": [
+    "serve"
+  ],
+  "base_settings": {
+    "OLLAMA_HOST": "127.0.0.1:11434",
+    "OLLAMA_NOHISTORY": "1",
+    "OLLAMA_ORIGINS": "http://127.0.0.1,http://localhost",
+    "OLLAMA_CONTEXT_LENGTH": "32768"
+  },
+  "default_models": [
+    "gemma4:e4b",
+    "gemma4:26b",
+    "functiongemma:270m",
+    "shieldgemma2:4b"
+  ],
+  "supported_models": [
+    "gemma4:e2b",
+    "gemma4:e4b",
+    "gemma4:26b",
+    "gemma4:31b",
+    "gemma3:4b",
+    "gemma3n:e4b",
+    "functiongemma:270m",
+    "shieldgemma2:4b"
+  ],
+  "managed_keys": [
+    "OLLAMA_HOST",
+    "OLLAMA_NOHISTORY",
+    "OLLAMA_ORIGINS",
+    "OLLAMA_CONTEXT_LENGTH"
+  ],
+  "removed_keys": []
+}

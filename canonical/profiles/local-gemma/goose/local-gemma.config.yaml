@@ -1,0 +1,6 @@
+GOOSE_PROVIDER: "ollama"
+GOOSE_MODEL: "gemma4:e4b"
+OLLAMA_HOST: "127.0.0.1:11434"
+extensions:
+  memory:
+    enabled: false

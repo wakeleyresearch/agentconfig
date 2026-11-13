@@ -9,6 +9,7 @@ from typing import Any
 
 from .formats import (
     FormatError,
+    dump_env,
     dump_json,
     dump_toml,
     dump_yaml,
@@ -33,6 +34,9 @@ _HARNESS_ALIASES: dict[str, str] = {
     "vscode-copilot": "copilot",
     "jetbrains": "copilot",
     "jetbrains-copilot": "copilot",
+    "litert": "litert-lm",
+    "litert-lm": "litert-lm",
+    "ollama": "ollama",
 }
 
 _HARNESS_SPEC_FILE: dict[str, str] = {
@@ -54,6 +58,16 @@ _HARNESS_SPEC_FILE: dict[str, str] = {
     "cline": "cline.json",
     "goose": "goose.json",
     "aider": "aider.json",
+    "litert": "litert-lm.json",
+    "litert-lm": "litert-lm.json",
+    "ollama": "ollama.json",
+}
+
+_LOCAL_GEMMA_PROFILE_SOURCES: dict[str, str] = {
+    "codex-local-gemma-profile": "canonical/profiles/local-gemma/codex/local-gemma.config.toml",
+    "opencode-local-gemma-profile": "canonical/profiles/local-gemma/opencode/local-gemma.opencode.jsonc",
+    "gemini-cli-local-gemma-profile": "canonical/profiles/local-gemma/gemini-cli/local-gemma.settings.json",
+    "goose-local-gemma-profile": "canonical/profiles/local-gemma/goose/local-gemma.config.yaml",
 }
 
 
@@ -302,7 +316,7 @@ def render_mcp_for_harness(
     """Render canonical/mcp-registry.json into the target harness's native MCP schema."""
     raw_h = harness.strip().lower()
     norm_h = normalize_harness(harness)
-    if norm_h == "aider":
+    if norm_h in ("aider", "litert-lm", "ollama"):
         return {}
 
     rendered_servers: dict[str, Any] = {}
@@ -457,7 +471,7 @@ def _render_skills_dir_files(repo_root: Path, failsafe: bool = False) -> dict[st
 def _load_failsafe_source(repo_root: Path, failsafe_source: str, fmt: str) -> tuple[bytes, Any]:
     p = repo_root / failsafe_source
     raw_bytes = p.read_bytes()
-    if fmt in ("json", "jsonc", "toml", "yaml", "yml"):
+    if fmt in ("json", "jsonc", "toml", "yaml", "yml", "env"):
         parsed = parse_by_format(raw_bytes.decode("utf-8"), fmt)
         return raw_bytes, parsed
     return raw_bytes, None
@@ -720,4 +734,73 @@ def render_target(
             repo_exclude=repo_exclude,
         )
 
+    if renderer == "ollama_env" or tid == "ollama-hardened-env":
+        env_path = repo_root / "canonical" / "profiles" / "failsafe" / "ollama" / "agentcfg-ollama.env"
+        if env_path.exists():
+            content = env_path.read_bytes()
+        else:
+            env_obj = copy.deepcopy(
+                spec.get("base_settings")
+                or {
+                    "OLLAMA_HOST": "127.0.0.1:11434",
+                    "OLLAMA_NOHISTORY": "1",
+                    "OLLAMA_ORIGINS": "http://127.0.0.1,http://localhost",
+                    "OLLAMA_CONTEXT_LENGTH": "32768",
+                }
+            )
+            content = dump_env(env_obj).encode("utf-8")
+        return RenderedTarget(
+            target_id=tid,
+            harness=harness,
+            strategy=strategy,
+            format=fmt or "env",
+            mode=mode,
+            content=content,
+            repo_exclude=repo_exclude,
+        )
+
+    if renderer == "local_gemma_profile" or tid in _LOCAL_GEMMA_PROFILE_SOURCES:
+        rel_src = str(
+            target.get("profile_source")
+            or target.get("failsafe_source")
+            or _LOCAL_GEMMA_PROFILE_SOURCES.get(tid, "")
+        )
+        src_path = repo_root / rel_src
+        if not rel_src or not src_path.exists():
+            raise ValueError(f"Missing local-gemma profile source {rel_src!r} for target {tid!r}")
+        return RenderedTarget(
+            target_id=tid,
+            harness=harness,
+            strategy=strategy,
+            format=fmt,
+            mode=mode,
+            content=src_path.read_bytes(),
+            repo_exclude=repo_exclude,
+        )
+
     raise ValueError(f"Unknown target renderer {renderer!r} for target {tid!r}")
+
+
+def render_canonical_target(
+    target: dict[str, Any] | str,
+    ctx: RuntimeContext | Path | None = None,
+    failsafe: bool = False,
+) -> RenderedTarget:
+    """Render a canonical target by target dict or target ID."""
+    if isinstance(ctx, RuntimeContext):
+        resolved_ctx = ctx
+    elif isinstance(ctx, Path):
+        resolved_ctx = RuntimeContext.from_args(repo=ctx)
+    else:
+        resolved_ctx = RuntimeContext.from_args()
+
+    if isinstance(target, str):
+        manifest = load_targets_manifest(resolved_ctx.repo_root)
+        matched = next((t for t in manifest if t.get("id") == target), None)
+        if matched is None:
+            raise ValueError(f"Unknown target id {target!r}")
+        target_dict = matched
+    else:
+        target_dict = target
+
+    return render_target(target_dict, resolved_ctx, failsafe=failsafe)

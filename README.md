@@ -1,6 +1,6 @@
 # agentconfig
 
-> **Status: Implemented (Phases 1–4 Complete)** — The `agentconfig` Source-of-Truth engine ([`bin/agentcfg`](bin/agentcfg) + [`lib/`](lib/)), security policies ([`policy/`](policy/)), canonical catalogs and failsafe profiles ([`canonical/`](canonical/)), target definitions ([`targets/targets.json`](targets/targets.json)), environment and secret wrappers ([`wrappers/`](wrappers/)), host `systemd` watch timer ([`systemd/`](systemd/)), offline backup helper ([`bin/agentcfg-backup`](bin/agentcfg-backup)), and unit test suite ([`tests/`](tests/)) are implemented in this repository alongside the architecture specification in [`docs/CONCEPT.md`](docs/CONCEPT.md).
+> **Status: Implemented (Phases 1–5 Complete)** — The `agentconfig` Source-of-Truth engine ([`bin/agentcfg`](bin/agentcfg) + [`lib/`](lib/)), hostile-environment 8-stage remediation CLI/TUI ([`bin/agentcfg-remediate`](bin/agentcfg-remediate) + [`lib/remediate.py`](lib/remediate.py)), security policies ([`policy/`](policy/)), canonical catalogs, failsafe profiles, and Google Local Models (`Gemma 4`, `FunctionGemma`, `ShieldGemma 2`, `LiteRT-LM`, `Ollama`) loopback profiles ([`canonical/`](canonical/)), Antigravity dynamic remediation workflow ([`workflows/`](workflows/)), target definitions ([`targets/targets.json`](targets/targets.json)), environment and secret wrappers ([`wrappers/`](wrappers/)), host `systemd` watch timer ([`systemd/`](systemd/)), offline backup helper ([`bin/agentcfg-backup`](bin/agentcfg-backup)), and unit test suite ([`tests/`](tests/)) are implemented in this repository alongside [`docs/CONCEPT.md`](docs/CONCEPT.md) and [`docs/REMEDIATION_WORKFLOW.md`](docs/REMEDIATION_WORKFLOW.md).
 
 `agentconfig` is a security-hardened, Git-backed **Source-of-Truth (SoT)** architecture and CLI toolkit for managing AI coding agent configurations, rules, skills, MCP servers, hooks, `/tmp/` sandboxing, agent memory hygiene, and update-drift controls across heterogeneous CLI, IDE, and desktop harnesses.
 
@@ -101,6 +101,7 @@ All target model families, harnesses, and cross-agent open standards are verifie
 | **Moonshot Kimi** (`kimi-code`) | `~/.kimi-code/` (`KIMI_CODE_HOME`), `~/.agents/` (via `$HOME`) | `config.toml`, `tui.toml`, `SYSTEM.md`, `AGENTS.md`, `mcp.json`, `skills/`, `agents/`, project `.kimi-code/{local.toml,mcp.json,AGENTS.md,skills/}` | `credentials/*.json`, `credentials/mcp/*.json` (`0600`), `api_key_env` mapping | Session `contextMemory` + `wire.jsonl` + `AGENTS.md`/`SYSTEM.md`; adjacent binary `.staging/` updates & `updates/install.lock` | `kimi doctor [config\|tui]`, `--skills-dir`, `--agent-file`, `KIMI_DISABLE_CRON=1`, `KIMI_CODE_WATCH=false`, `CONFIG_PERSIST_BLOCKED`, `/reload` |
 | **xAI Grok** (Grok Build vs `@vibe-kit/grok-cli`) | `$GROK_HOME` (`~/.grok/` — collides w/ `@vibe-kit/grok-cli`!), `/etc/grok/` | `config.toml`, `managed_config.toml`, `requirements.toml`, `sandbox.toml`, `trusted_folders.toml`, `hooks/*.json`, `skills/`, `AGENTS.md` | `auth.json`, `mcp_credentials.json` | Opt-in memory (`GROK_MEMORY=0` default, `--experimental-memory`), `sessions/`, `bwrap` (`sandbox.toml`) | `grok inspect`, `grok mcp doctor`, `grok plugin validate`, `--no-memory`, `--no-plan`, `GROK_{CURSOR,CLAUDE}_*=0`, `GROK_DISABLE_AUTOUPDATER=1`, `grok memory clear --all` |
 | **Cross-Model & IDE Harnesses** (OpenCode V2, Cursor, Devin, Cline, Goose, Aider) | XDG (`~/.config/opencode/`, `~/.config/devin/`, `~/.config/goose/`), `~/.cursor/`, `~/.cline/`, `~/.aider.conf.yml` | `AGENTS.md` (all except Aider natively), `~/.agents/skills/*/SKILL.md`, `agent-plugins.org` `plugin.json`; per-harness `opencode.jsonc`, `.cursor/rules/*.mdc`, `mcp_config.json`, `cline_mcp_settings.json`, `config.yaml`, `.aider.conf.yml` | Goose `secrets.yaml`, Cline `providers.json`, inline headers | OpenCode SQLite (`OPENCODE_DB`), Cursor Memories **removed in 2.1**, Cline `memory-bank/*.md`, Goose `~/.config/goose/memory/`, Aider `.aider.{chat,input}.history`; `/tmp/opencode` | OpenCode `--standalone` / `OPENCODE_DB=:memory:`, Cursor `CURSOR_CONFIG_DIR` / `--sandbox`, Devin `--config` / `/rm-session`, Cline `cline doctor [fix\|log]`, Goose `goose run --no-session` / `GOOSE_PATH_ROOT`, Aider `--no-check-update` / `--no-restore-chat-history` |
+| **Google Local Models & Runtimes** (`litert-lm`, `ollama`: **Gemma 4** `e2b`/`e4b`/`26b` MoE/`31b`, **Gemma 3/3n**, **FunctionGemma** `270m`, **ShieldGemma 2** `4b`) | `~/.litert-lm/`, `~/.ollama/`, plus `--profile local-gemma` profiles in `~/.codex/`, `~/.gemini/profiles/`, `~/.config/opencode/profiles/`, `~/.config/goose/profiles/` | `~/.litert-lm/config.json` (`127.0.0.1:8080`, `gemma-4-E4B-it`, `functiongemma-270m-it`, `shieldgemma-2-4b-it`), `~/.ollama/agentcfg-ollama.env` (`OLLAMA_HOST=127.0.0.1:11434`, `OLLAMA_CONTEXT_LENGTH=32768`), `local-gemma` per-harness profiles | `~/.ollama/id_ed25519` (private registry key, never Git) | `~/.ollama/models/{blobs,manifests}`, `Modelfile` `SYSTEM` prompts, `~/.litert-lm/cache/`; unverified `.pkl` or `0666` model blobs | Loopback-only binding (`127.0.0.1:8080` & `127.0.0.1:11434`), `OLLAMA_NOHISTORY=1`, `telemetry: false`, `agentcfg cleanse --harness ollama --harness litert-lm`, `agentcfg-remediate --profile local-gemma --offline` |
 
 ---
 
@@ -149,8 +150,13 @@ Remediates corrupted state into a timestamped, non-executable `0700` quarantine 
 - **Memory hygiene**: Scans memory stores for invisible Unicode, exfiltration directives (`curl`, `wget`, `.ssh`, token paths), and anomalous growth; captures pre-cleanse memory snapshots (`0600`); selectively excises poisoned sections; and enforces opt-out flags against cloud/local memory capture.
 
 ### 5. Local & Upstream Update-Change Monitor
-- **Local monitor (`agentcfg watch-updates` / `agentcfg doctor` / `systemd --user` timer)**: Maintains `~/.local/state/agentcfg/host-footprint.json` (`0600`) tracking binary versions & SHA-256 hashes (`agy`, `claude`, `codex`, `gemini`, `copilot`, `gh`, `kimi`, `grok`, `opencode`, `cline`, `goose`), Antigravity `builtin/{.checksum,.manifest}`, metadata-only config/permission/directory state (skipping secrets), and sorted JSON/TOML key-shape diffs. Halts unattended `agentcfg apply` on `NEW_KEY`, `DROPPED_KEY`, or `NEW_MEMORY_PATH`.
+- **Local monitor (`agentcfg watch-updates` / `agentcfg doctor` / `systemd --user` timer)**: Maintains `~/.local/state/agentcfg/host-footprint.json` (`0600`) tracking binary versions & SHA-256 hashes (`agy`, `claude`, `codex`, `gemini`, `copilot`, `gh`, `kimi`, `grok`, `opencode`, `cline`, `goose`, `litert-lm`, `ollama`), Antigravity `builtin/{.checksum,.manifest}`, metadata-only config/permission/directory state (skipping secrets), and sorted JSON/TOML key-shape diffs. Halts unattended `agentcfg apply` on `NEW_KEY`, `DROPPED_KEY`, or `NEW_MEMORY_PATH`.
 - **Upstream monitor (`.github/workflows/upstream-schema-watch.yml` + `agentcfg upstream-check`)**: Periodically checks pinned official JSON schemas and release feeds (`policy/upstream-sources.json`) against local snapshots (`policy/upstream-schemas/`), following fail-closed baseline-diffing patterns (`agent-sh/agnix` `spec-drift.yml`) and opening a deduplicated labeled GitHub Issue/draft PR on breaking deltas before renderers are updated.
+
+### 6. Hostile-Environment Agent Onboarding, Remediation & Google Local Models
+- **8-Stage Crash-Journaled Remediation Pipeline (`bin/agentcfg-remediate`, `agentcfg remediate`, `agentcfg onboard`, [`docs/REMEDIATION_WORKFLOW.md`](docs/REMEDIATION_WORKFLOW.md))**: Handles simultaneous **active malware**, **corrupted config/SQLite/lock state**, and **degraded or offline networks** across `0_bootstrap_verify` (including offline Git `.bundle` auto-recovery into `~/.local/state/agentcfg/recovery-sot/`), `1_process_and_env_audit` (`/proc/<pid>` inspection for `LD_PRELOAD`, `NODE_OPTIONS`, `PYTHONSTARTUP`, and rogue `*_BASE_URL` overrides, with optional `--quiesce`), `2_forensic_capture` (`0700` forensic snapshot + SHA-256 manifest + tightening Tier-B auth files to `0600`), `3_containment_failsafe`, `4_deep_cleanse` (harness-scoped `--harness` quarantine), `5_canonical_apply` (`canonical`, `failsafe`, or `local-gemma`), `6_airgapped_canary` (`verify_deployed` + `bwrap --unshare-net` parse check), and `7_seal_and_receipt` (tamper-evident SHA-256 receipt in `~/.local/state/agentcfg/receipts/`).
+- **Google Local Models Integration (`--profile local-gemma`)**: First-class offline loopback configurations for **Gemma 4** (`gemma4:e2b`, `gemma4:e4b`, `gemma4:26b` MoE, `gemma4:31b`), **Gemma 3 & Gemma 3n**, **FunctionGemma** (`functiongemma:270m`), and **ShieldGemma 2** (`shieldgemma2:4b`) via **Google LiteRT-LM** (`~/.litert-lm/config.json` on `127.0.0.1:8080`), **Gemini CLI native local routing** (`gemini gemma`), and **Ollama** (`~/.ollama/agentcfg-ollama.env` on `127.0.0.1:11434`, `num_ctx: 32768`) for Codex CLI, OpenCode V2, Goose, and Aider.
+- **Antigravity Dynamic Workflow (`workflows/remediate_agent_workflow.py`)**: 3-phase `run_workflow` script orchestrating `parallel_triage`, `staged_remediation`, and `independent_verification`.
 
 ---
 
@@ -184,9 +190,9 @@ python3 bin/agentcfg verify [--harness HARNESS]...
 # 6. Restore targets from a recorded snapshot under state_dir/snapshots/
 python3 bin/agentcfg restore [--snapshot SNAPSHOT]
 
-# 7. Quarantine corrupt configs, stale runtime locks/DBs/tmps, or poisoned memory
-python3 bin/agentcfg cleanse [--scope {config,memory,runtime,all}] [--dry-run] \
-  [--auto-quarantine] [--include-auth] [--confirm-wipe-auth] \
+# 7. Quarantine corrupt configs, stale runtime locks/DBs/tmps, or poisoned memory (all or per --harness)
+python3 bin/agentcfg cleanse [--scope {config,memory,runtime,all}] [--harness HARNESS]... \
+  [--dry-run] [--auto-quarantine] [--include-auth] [--confirm-wipe-auth] \
   [--no-restore-targets] [--native-wipe]
 
 # 8. Switch live targets to/from failsafe or launch an isolated ephemeral failsafe session
@@ -200,6 +206,14 @@ python3 bin/agentcfg watch-updates [--check] [--update-baseline] [--fast]
 
 # 11. Compare pinned upstream schema snapshots (or fetch live HTTPS specs with --fetch)
 python3 bin/agentcfg upstream-check [--fetch] [--update-baseline]
+
+# 12. Hostile-environment 8-stage agent remediation & onboarding (via agentcfg or standalone CLI/TUI)
+python3 bin/agentcfg remediate [--harness HARNESS]... [--profile {canonical,failsafe,local-gemma}] \
+  [--local-model MODEL] [--offline] [--quiesce] [--resume] [--from-backup BUNDLE]
+python3 bin/agentcfg onboard [--harness HARNESS]... [--profile {canonical,failsafe,local-gemma}] \
+  [--local-model MODEL] [--offline]
+bin/agentcfg-remediate [--agent <name|all>] [--profile {canonical,failsafe,local-gemma}] \
+  [--local-model gemma4:e4b] [--offline] [--quiesce] [--resume] [--interactive | --non-interactive] [--json]
 ```
 
 ### Runtime Wrappers, Offline Backup & Tests
@@ -256,7 +270,8 @@ Ecosystem research (`#26`, verified in `#27`) benchmarked major open-source conf
 /home/omniboot/agentconfig/
 ├── README.md                                  # Project overview, CLI quickstart & roadmap (this file)
 ├── docs/
-│   └── CONCEPT.md                             # Full architecture, per-harness spec & threat model
+│   ├── CONCEPT.md                             # Full architecture, per-harness spec & threat model
+│   └── REMEDIATION_WORKFLOW.md                # Hostile-environment 8-stage remediation & Google Local Models runbook
 ├── .gitignore                                 # Blocks *.dec.*, .age/, dist/, *.tmp, state/, backups/
 ├── .githooks/
 │   └── pre-commit                             # Tracked secret, syntax, & policy gate
@@ -264,19 +279,24 @@ Ecosystem research (`#26`, verified in `#27`) benchmarked major open-source conf
 │   └── workflows/
 │       └── upstream-schema-watch.yml          # Scheduled upstream schema & release diff monitor
 ├── bin/
-│   ├── agentcfg                               # Python 3.12 CLI entrypoint (11 subcommands)
+│   ├── agentcfg                               # Python 3.12 CLI entrypoint (13 subcommands incl. remediate & onboard)
+│   ├── agentcfg-remediate                     # Standalone 8-stage remediation CLI + interactive ANSI TUI wizard
 │   └── agentcfg-backup                        # Offline git bundle + tar.gz + sha256sum (+ age) helper
 ├── lib/                                       # Pure Python 3.12 stdlib engine (zero PyPI deps; optional GIR Secret)
 │   ├── __init__.py
 │   ├── audit.py                               # Untrusted repo scanner (audit-repo)
-│   ├── cleanse.py                             # Config/memory/runtime quarantine & auth-preservation
+│   ├── cleanse.py                             # Config/memory/runtime quarantine (--harness scoped) & auth-preservation
 │   ├── deployer.py                            # Atomic staging, flock, snapshots, manifest, verify/restore
 │   ├── failsafe.py                            # Persistent failsafe swap & ephemeral session launcher
 │   ├── formats.py                             # JSON/JSONC/TOML/YAML parsers & key-allowlist patchers
 │   ├── monitor.py                             # Local footprint watch-updates & upstream-check
 │   ├── paths.py                               # Repo/home/state path resolution & Grok flavor checks
 │   ├── policy.py                              # Policy enforcement, budgets, invisible Unicode & secret fallback
-│   └── render.py                              # Canonical -> per-harness target renderers
+│   ├── remediate.py                           # 8-stage crash-journaled RemediationOrchestrator, /proc audit & receipts
+│   └── render.py                              # Canonical -> per-harness target renderers (incl. local-gemma profiles)
+├── workflows/
+│   ├── remediate_agent_workflow.py            # 3-phase Antigravity run_workflow (parallel_triage, staged_remediation, verify)
+│   └── workflow.json                          # Workflow manifest & input schema
 ├── wrappers/
 │   ├── agent-env-run                          # umask 0077, private 0700 $TMPDIR/$XDG_RUNTIME_DIR, --failsafe, bwrap
 │   └── mcp-secret-exec                        # secret-tool / gi.Secret / sops+age -> env -i <VAR>=... <cmd>
@@ -284,7 +304,7 @@ Ecosystem research (`#26`, verified in `#27`) benchmarked major open-source conf
 │   ├── agentcfg-watch.service                 # User oneshot service for agentcfg watch-updates --check
 │   └── agentcfg-watch.timer                   # Periodic user systemd timer
 ├── policy/
-│   ├── security-policy.json                   # Banned patterns (npx -y, http:// MCP), size caps, allowed *_BASE_URLs
+│   ├── security-policy.json                   # Banned patterns, size caps, allowed *_BASE_URLs & local_model_loopback
 │   ├── manifests.lock.json                    # Pinned MCP versions, package integrity hashes, tools/list SHA-256
 │   ├── upstream-sources.json                  # Pinned upstream JSON schema & release-note URLs
 │   └── upstream-schemas/                      # Pinned reference snapshots (agentskills, claude-code, codex, gemini-cli, opencode)
@@ -294,26 +314,30 @@ Ecosystem research (`#26`, verified in `#27`) benchmarked major open-source conf
 │   ├── skills/
 │   │   └── agent-hygiene/
 │   │       └── SKILL.md                       # Shared hygiene & pre-trust review skill
+│   ├── workflows/
+│   │   └── remediate-agent.md                 # Canonical /remediate-agent containment & local Gemma 4 fallback guide
 │   ├── hooks/
 │   │   └── hooks.json                         # Canonical reviewed hook definitions
 │   ├── mcp-registry.json                      # Canonical MCP catalog (uses secret_ref IDs, ZERO secrets)
-│   ├── harnesses/                             # 13 per-harness specs (aider, antigravity, claude-code, cline, codex,
-│   │                                          #   copilot, cursor, devin, gemini-cli, goose, grok, kimi-code, opencode)
+│   ├── harnesses/                             # 15 per-harness/runtime specs (aider, antigravity, claude-code, cline, codex,
+│   │                                          #   copilot, cursor, devin, gemini-cli, goose, grok, kimi-code, litert-lm, ollama, opencode)
 │   └── profiles/
-│       └── failsafe/                          # Minimal zero-trust failsafe baseline (rules.md + all 13 harnesses)
+│       ├── failsafe/                          # Minimal zero-trust failsafe baseline (rules.md + all 15 harnesses/runtimes)
+│       └── local-gemma/                       # Loopback-only Google Gemma 4 / FunctionGemma / ShieldGemma 2 profiles
 ├── targets/
 │   └── targets.json                           # Target paths, modes (0400/0444/0600), strategies (ro|patch-managed-keys|plugin-bundle)
 ├── secrets/
 │   ├── .sops.yaml                             # age public-key recipients & encryption rules
 │   └── README.md                              # Secret provisioning guide (secrets.enc.yaml optional locally)
-└── tests/                                     # Isolated tempdir unittest suite (helpers.py + 5 test modules)
+└── tests/                                     # Isolated tempdir unittest suite (helpers.py + 6 test modules)
     ├── __init__.py
     ├── helpers.py
     ├── test_validate.py
     ├── test_rendering_and_schemas.py
     ├── test_deploy_apply_verify_restore.py
     ├── test_cleanse.py
-    └── test_watch_audit_wrappers.py
+    ├── test_watch_audit_wrappers.py
+    └── test_remediate_and_local_models.py
 ```
 
 ---
@@ -330,12 +354,15 @@ Ecosystem research (`#26`, verified in `#27`) benchmarked major open-source conf
 - [x] **Phase 2 — Core `agentcfg` Engine, `cleanse` & `failsafe`**:
   - Implemented Python 3.12 stdlib `bin/agentcfg` + `lib/*.py` (`validate`, `diff`, `apply --safe`, `verify`, `restore`, `cleanse`, `failsafe`, `audit-repo`, `doctor`), `wrappers/{agent-env-run,mcp-secret-exec}`, and isolated `tests/` suite.
 - [x] **Phase 3 — Canonical Catalog & Per-Harness Renderers**:
-  - Populated `policy/`, `canonical/` (shared rules, `SKILL.md`, hooks, MCP registry, 13 harness definitions, and `canonical/profiles/failsafe/`), `targets/targets.json`, and deterministic renderers with `.git/info/exclude` wiring for repo `.agents/` targets.
+  - Populated `policy/`, `canonical/` (shared rules, `SKILL.md`, hooks, MCP registry, 15 harness/runtime definitions, and `canonical/profiles/failsafe/`), `targets/targets.json`, and deterministic renderers with `.git/info/exclude` wiring for repo `.agents/` targets.
 - [x] **Phase 4 — Update Monitors & Offline Recovery**:
   - Implemented `agentcfg watch-updates`, `agentcfg upstream-check`, `systemd/agentcfg-watch.{service,timer}` (seeded `host-footprint.json` baseline and active user timer), `.github/workflows/upstream-schema-watch.yml`, and reproducible offline `bin/agentcfg-backup`.
+- [x] **Phase 5 — Hostile-Environment Remediation Engine, Dynamic Workflows & Google Local Models**:
+  - Implemented 8-stage crash-journaled `RemediationOrchestrator` (`lib/remediate.py`), harness-scoped cleansing (`lib/cleanse.py` `--harness`), standalone CLI/TUI (`bin/agentcfg-remediate` + `agentcfg remediate` / `onboard`), Google Local Models (`Gemma 4`, `Gemma 3/3n`, `FunctionGemma`, `ShieldGemma 2`, `LiteRT-LM` `127.0.0.1:8080`, `Ollama` `127.0.0.1:11434`, `canonical/profiles/local-gemma/`), 3-phase Antigravity `run_workflow` script (`workflows/remediate_agent_workflow.py`), and operator runbook ([`docs/REMEDIATION_WORKFLOW.md`](docs/REMEDIATION_WORKFLOW.md)).
 
 ---
 
 ## Further Reading
 
 - [`docs/CONCEPT.md`](docs/CONCEPT.md) — Complete threat model, per-harness configuration/memory/`/tmp/` specifications, `cleanse`/`failsafe` state machines, GitHub ecosystem benchmark, atomic deployment protocol, and ratified implementation architecture.
+- [`docs/REMEDIATION_WORKFLOW.md`](docs/REMEDIATION_WORKFLOW.md) — Hostile-environment triple-failure threat model (malware + corrupted state + bad/offline network), 8-stage crash-journaled remediation pipeline, CLI/TUI reference, and Google Local Models (`Gemma 4`, `FunctionGemma`, `ShieldGemma 2`, `LiteRT-LM`, `Ollama`) integration guide.

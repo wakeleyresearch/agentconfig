@@ -36,6 +36,8 @@ MONITORED_BINARIES = (
     "cline",
     "goose",
     "aider",
+    "litert-lm",
+    "ollama",
     "bwrap",
 )
 
@@ -68,6 +70,8 @@ HARNESS_ROOTS = (
     ".config/goose",
     ".cursor",
     ".cline",
+    ".litert-lm",
+    ".ollama",
 )
 
 HARNESS_SINGLETON_FILES = (
@@ -106,6 +110,11 @@ TRACKED_CONFIG_NAMES = {
     "config.yaml": "yaml",
     ".claude.json": "json",
     ".aider.conf.yml": "yaml",
+    "agentcfg-ollama.env": "env",
+    "local-gemma.config.toml": "toml",
+    "local-gemma.opencode.jsonc": "jsonc",
+    "local-gemma.settings.json": "json",
+    "local-gemma.config.yaml": "yaml",
 }
 
 
@@ -260,7 +269,7 @@ def _load_deployed_ro_paths(ctx: RuntimeContext) -> set[str]:
         return set()
     out: set[str] = set()
     for item in doc.get("targets", {}).values():
-        if isinstance(item, dict) and item.get("strategy") in ("ro", "plugin-bundle"):
+        if isinstance(item, dict) and item.get("strategy") in ("ro", "replace-owned", "plugin-bundle"):
             if item.get("path"):
                 out.add(str(item["path"]))
     return out

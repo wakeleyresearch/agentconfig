@@ -102,6 +102,55 @@
       ]
     }
   },
+  "local_model_loopback": {
+    "enabled": true,
+    "allowed_providers": [
+      "ollama",
+      "litert-lm",
+      "gemma"
+    ],
+    "allowed_hosts": [
+      "127.0.0.1",
+      "localhost"
+    ],
+    "allowed_ports": [
+      11434,
+      8080
+    ],
+    "allowed_origins": [
+      "http://127.0.0.1:11434",
+      "http://localhost:11434",
+      "http://127.0.0.1:8080",
+      "http://localhost:8080"
+    ],
+    "banned_hosts": [
+      "0.0.0.0",
+      "::",
+      "*"
+    ],
+    "default_models": {
+      "ollama": [
+        "gemma4:e2b",
+        "gemma4:e4b",
+        "gemma4:26b",
+        "gemma4:31b",
+        "gemma3:4b",
+        "gemma3n:e4b",
+        "functiongemma:270m",
+        "shieldgemma2:4b"
+      ],
+      "litert-lm": [
+        "gemma-4-E2B-it",
+        "gemma-4-E4B-it",
+        "gemma-4-26B-A4B-it",
+        "gemma-4-31B-it",
+        "gemma-3-4b-it",
+        "gemma-3n-E4B-it",
+        "functiongemma-270m-it",
+        "shieldgemma-2-4b-it"
+      ]
+    }
+  },
   "unicode": {
     "ban_invisible_ranges": [
       ["0x200B", "0x200F"],

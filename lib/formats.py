@@ -587,6 +587,40 @@ def dump_yaml(data: Any) -> str:
     return "\n".join(_emit_yaml(data)) + "\n"
 
 
+def parse_env(text: str) -> dict[str, str]:
+    """Parse a dotenv / KEY=VALUE file into a dict."""
+    if text.startswith("\ufeff"):
+        raise FormatError("UTF-8 BOM is forbidden in .env files")
+    out: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if "=" not in line:
+            raise FormatError(f"Invalid .env line (missing '='): {raw_line!r}")
+        key, val = line.split("=", 1)
+        key = key.strip()
+        if not key or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", key):
+            raise FormatError(f"Invalid .env variable name: {key!r}")
+        val = val.strip()
+        if len(val) >= 2 and ((val[0] == '"' and val[-1] == '"') or (val[0] == "'" and val[-1] == "'")):
+            val = val[1:-1]
+        out[key] = val
+    return out
+
+
+def dump_env(data: dict[str, Any]) -> str:
+    """Deterministically serialize a dict to KEY=VALUE format."""
+    lines = ["# agentconfig hardened loopback-only Ollama environment"]
+    for key, val in data.items():
+        if val is None:
+            continue
+        lines.append(f"{key}={val}")
+    return "\n".join(lines) + "\n"
+
+
 def parse_by_format(text: str, fmt: str) -> Any:
     """Dispatch parser based on format name."""
     norm = fmt.lower()
@@ -598,6 +632,8 @@ def parse_by_format(text: str, fmt: str) -> Any:
         return parse_toml(text)
     if norm in ("yaml", "yml"):
         return parse_yaml_subset(text)
+    if norm == "env":
+        return parse_env(text)
     if norm in ("markdown", "md", "mdc"):
         fm, _ = parse_yaml_frontmatter(text)
         return fm or {}
@@ -615,6 +651,10 @@ def dump_by_format(data: Any, fmt: str) -> str:
         return dump_toml(data)
     if norm in ("yaml", "yml"):
         return dump_yaml(data)
+    if norm == "env":
+        if not isinstance(data, dict):
+            raise FormatError("ENV root must be a dict")
+        return dump_env(data)
     raise FormatError(f"Unsupported serialization format: {fmt}")
 
 

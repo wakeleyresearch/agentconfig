@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.0",
+  "name": "remediate-agent",
+  "title": "Hostile-Environment Agent Onboarding & Remediation Workflow",
+  "description": "3-phase Antigravity dynamic workflow (parallel_triage, staged_remediation, independent_verification) for onboarding and remediating coding agents under simultaneous malware, corrupted configuration/SQLite state, and degraded or offline networks using local Gemma 4 / LiteRT-LM / Ollama.",
+  "entrypoint": "remediate_agent_workflow.py",
+  "script": "remediate_agent_workflow.py",
+  "phases": [
+    "parallel_triage",
+    "staged_remediation",
+    "independent_verification"
+  ],
+  "args": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "agents": {
+        "type": "array",
+        "description": "Target agent harnesses to triage, remediate, and verify.",
+        "items": {
+          "type": "string",
+          "enum": [
+            "antigravity",
+            "gemini-cli",
+            "claude-code",
+            "codex",
+            "copilot",
+            "kimi-code",
+            "grok",
+            "opencode",
+            "cursor",
+            "devin",
+            "cline",
+            "goose",
+            "aider",
+            "litert-lm",
+            "ollama"
+          ]
+        },
+        "default": [
+          "codex",
+          "claude-code",
+          "gemini-cli",
+          "opencode"
+        ]
+      },
+      "profile": {
+        "type": "string",
+        "description": "Remediation deployment profile (canonical, failsafe, or local-gemma).",
+        "enum": [
+          "canonical",
+          "failsafe",
+          "local-gemma"
+        ],
+        "default": "local-gemma"
+      },
+      "local_model": {
+        "type": "string",
+        "description": "Local Google Gemma / LiteRT-LM / Ollama model identifier for offline or local-gemma profile.",
+        "default": "gemma4:e4b"
+      },
+      "offline": {
+        "type": "boolean",
+        "description": "Enforce airgapped/loopback-only remediation with zero external network calls.",
+        "default": true
+      },
+      "quiesce": {
+        "type": "boolean",
+        "description": "Terminate rogue non-ancestor target agent processes discovered in /proc.",
+        "default": false
+      },
+      "resume": {
+        "type": "boolean",
+        "description": "Resume an interrupted remediation run from remediation-journal.json.",
+        "default": false
+      },
+      "from_backup": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Optional path to a verified offline git .bundle for Stage 0 SoT recovery.",
+        "default": null
+      },
+      "project_dir": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Optional project workspace directory for repository audit and .agents/ exclusions.",
+        "default": null
+      }
+    }
+  }
+}

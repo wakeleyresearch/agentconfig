@@ -44,6 +44,8 @@ EXPECTED_HARNESSES = {
     "cline",
     "goose",
     "aider",
+    "litert-lm",
+    "ollama",
 }
 
 
@@ -178,6 +180,7 @@ class RenderingAndSchemaTests(IsolatedEnvMixin, unittest.TestCase):
             ".yaml": "yaml",
             ".yml": "yaml",
             ".md": "markdown",
+            ".env": "env",
         }
         for fp in files:
             with self.subTest(file=str(fp.relative_to(fs_root))):

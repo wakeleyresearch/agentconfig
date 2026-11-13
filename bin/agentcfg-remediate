@@ -1,0 +1,272 @@
+#!/usr/bin/env python3
+"""agentcfg-remediate — Hostile-Environment Agent Onboarding & 8-Stage Remediation CLI/TUI."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from lib.cleanse import HARNESS_CONFIG_ROOTS, run_cleanse
+from lib.paths import RuntimeContext
+from lib.remediate import (
+    DEFAULT_LOCAL_MODEL,
+    REMEDIATION_STAGES,
+    VALID_PROFILES,
+    RemediationOrchestrator,
+    audit_live_agent_processes,
+    get_remediation_status,
+    normalize_remediation_harnesses,
+)
+
+# ANSI color constants
+_RESET = "\033[0m"
+_BOLD = "\033[1m"
+_CYAN = "\033[36m"
+_GREEN = "\033[32m"
+_YELLOW = "\033[33m"
+_RED = "\033[31m"
+_DIM = "\033[2m"
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="agentcfg-remediate",
+        description="Hostile-environment agent onboarding & 8-stage crash-journaled remediation engine",
+    )
+    parser.add_argument(
+        "--agent",
+        "--harness",
+        "-H",
+        action="append",
+        dest="agents",
+        default=None,
+        help="Target agent/harness name or 'all' (repeatable or comma-separated; default: all)",
+    )
+    parser.add_argument(
+        "--profile",
+        choices=list(VALID_PROFILES),
+        default=None,
+        help="Target profile to deploy in Stage 5 (canonical, failsafe, or local-gemma)",
+    )
+    parser.add_argument(
+        "--local-model",
+        dest="local_model",
+        default=DEFAULT_LOCAL_MODEL,
+        help=f"Local Gemma/Ollama model identifier for local-gemma profile (default: {DEFAULT_LOCAL_MODEL})",
+    )
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        default=True,
+        help="Operate in airgapped/offline mode without external network fetches (default: true)",
+    )
+    parser.add_argument(
+        "--from-backup",
+        dest="from_backup",
+        default=None,
+        help="Recover SoT repository from a verified git .bundle or .tar.gz archive in Stage 0",
+    )
+    parser.add_argument(
+        "--quiesce",
+        action="store_true",
+        default=False,
+        help="Send SIGTERM to non-ancestor target agent processes during Stage 1",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        default=False,
+        help="Resume from the last uncompleted stage in remediation-journal.json",
+    )
+    parser.add_argument("--project", default=None, help="Project directory for repo-scoped .agents/ targets")
+    parser.add_argument("--repo", default=None, help="Override agentconfig repository root")
+    parser.add_argument("--home", default=None, help="Override target HOME directory")
+    parser.add_argument("--state-dir", dest="state_dir", default=None, help="Override agentcfg state directory")
+    parser.add_argument(
+        "--grok-flavor",
+        dest="grok_flavor",
+        choices=["xai", "vibekit"],
+        default=None,
+        help="Explicitly disambiguate ~/.grok/ flavor",
+    )
+    parser.add_argument("--require-signed", action="store_true", help="Require verified signed git HEAD")
+
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument("--interactive", action="store_true", help="Launch interactive ANSI TUI wizard")
+    mode_group.add_argument("--non-interactive", action="store_true", help="Run non-interactively without prompts")
+
+    parser.add_argument("--json", action="store_true", help="Emit structured JSON output")
+    parser.add_argument("--status", action="store_true", help="Show remediation journal, receipts, and process status")
+    return parser
+
+
+def _render_tui_wizard(
+    ctx: RuntimeContext,
+    initial_agents: list[str] | None,
+    initial_profile: str | None,
+    initial_model: str,
+) -> tuple[list[str], str, str]:
+    sys.stdout.write(f"\n{_BOLD}{_CYAN}╔══════════════════════════════════════════════════════════════════════════╗{_RESET}\n")
+    sys.stdout.write(f"{_BOLD}{_CYAN}║   AGENTCFG HOSTILE-ENVIRONMENT ONBOARDING & REMEDIATION WIZARD (PHASE 5) ║{_RESET}\n")
+    sys.stdout.write(f"{_BOLD}{_CYAN}╚══════════════════════════════════════════════════════════════════════════╝{_RESET}\n\n")
+
+    proc_audit = audit_live_agent_processes()
+    dry_cleanse = run_cleanse(ctx, scope="all", apply=False)
+    q_count = len(dry_cleanse.get("quarantined", []))
+    p_count = len(proc_audit.get("findings", []))
+
+    health_color = _GREEN if (q_count == 0 and p_count == 0) else _YELLOW
+    sys.stdout.write(f"{_BOLD}Host Telemetry Pre-Scan:{_RESET}\n")
+    sys.stdout.write(f"  • Live /proc anomalies detected : {health_color}{p_count}{_RESET}\n")
+    sys.stdout.write(f"  • Config/SQLite/Memory threats  : {health_color}{q_count}{_RESET}\n")
+    sys.stdout.write(f"  • Protected Auth files preserved: {_GREEN}{len(dry_cleanse.get('preserved_auth_or_live', []))}{_RESET}\n\n")
+
+    default_agent_str = ",".join(initial_agents) if initial_agents else "codex"
+    try:
+        raw_agent = input(
+            f"{_BOLD}Select target agent(s){_RESET} [{', '.join(sorted(HARNESS_CONFIG_ROOTS))} | all] "
+            f"(default: {default_agent_str}): "
+        ).strip()
+    except EOFError:
+        raw_agent = ""
+    chosen_agents = normalize_remediation_harnesses(raw_agent or default_agent_str, repo_root=ctx.repo_root)
+
+    default_prof = initial_profile or "local-gemma"
+    try:
+        raw_prof = input(
+            f"{_BOLD}Select deployment profile{_RESET} [canonical | failsafe | local-gemma] "
+            f"(default: {default_prof}): "
+        ).strip()
+    except EOFError:
+        raw_prof = ""
+    chosen_profile = raw_prof if raw_prof in VALID_PROFILES else default_prof
+
+    chosen_model = initial_model
+    if chosen_profile == "local-gemma":
+        try:
+            raw_mod = input(
+                f"{_BOLD}Select Google Local Model{_RESET} [gemma4:e4b | gemma4:26b | gemma4:31b | gemma4:e2b] "
+                f"(default: {initial_model}): "
+            ).strip()
+        except EOFError:
+            raw_mod = ""
+        if raw_mod:
+            chosen_model = raw_mod
+
+    sys.stdout.write("\n")
+    return chosen_agents, chosen_profile, chosen_model
+
+
+def _make_progress_printer(enabled: bool):
+    def _on_progress(harness: str, stage: str, status: str, detail: dict[str, Any]) -> None:
+        if not enabled:
+            return
+        badge = f"{_GREEN}✔ COMPLETED{_RESET}" if status == "completed" else f"{_YELLOW}↷ RESUMED  {_RESET}"
+        extra = ""
+        if stage == "2_forensic_capture" and detail.get("bundle_dir"):
+            extra = f" ({detail['bundle_dir']})"
+        elif stage == "4_deep_cleanse":
+            extra = f" (quarantined={detail.get('quarantined_count', 0)})"
+        elif stage == "5_canonical_apply" and detail.get("local_gemma_profile_path"):
+            extra = f" (local-gemma={detail['local_gemma_profile_path']})"
+        elif stage == "7_seal_and_receipt" and detail.get("receipt_path"):
+            extra = f" ({detail['receipt_path']})"
+        sys.stdout.write(f"  [{harness}] {stage:26s} -> {badge}{_DIM}{extra}{_RESET}\n")
+        sys.stdout.flush()
+
+    return _on_progress
+
+
+def _emit_human_summary(result: dict[str, Any]) -> None:
+    status_str = f"{_GREEN}OK{_RESET}" if result.get("ok") else f"{_RED}FAILED{_RESET}"
+    sys.stdout.write(
+        f"\n{_BOLD}Remediation Summary:{_RESET} {status_str} "
+        f"(agents={','.join(result.get('agents', []))}, profile={result.get('profile')})\n"
+    )
+    for rp in result.get("receipt_paths", []):
+        sys.stdout.write(f"  Receipt: {rp}\n")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    as_json = bool(args.json)
+
+    try:
+        ctx = RuntimeContext.from_args(
+            repo=args.repo,
+            home=args.home,
+            state_dir=args.state_dir,
+            project=args.project,
+            grok_flavor=args.grok_flavor,
+            require_signed=bool(args.require_signed),
+        )
+
+        if args.status:
+            st = get_remediation_status(ctx)
+            if as_json:
+                sys.stdout.write(json.dumps(st, indent=2, ensure_ascii=False) + "\n")
+            else:
+                sys.stdout.write(f"Journal: {st['journal_path']} (exists={st['journal_exists']})\n")
+                for ag, info in (st["journal"].get("agents") or {}).items():
+                    done = [k for k, v in (info.get("stages") or {}).items() if isinstance(v, dict) and v.get("status") == "completed"]
+                    sys.stdout.write(f"  - {ag}: status={info.get('status')} ({len(done)}/{len(REMEDIATION_STAGES)} stages)\n")
+                sys.stdout.write(f"Recent receipts: {len(st['recent_receipts'])}\n")
+            return 0
+
+        use_interactive = bool(
+            args.interactive
+            or (not args.non_interactive and not as_json and sys.stdin.isatty() and not args.agents)
+        )
+
+        target_agents = normalize_remediation_harnesses(args.agents, repo_root=ctx.repo_root) if args.agents else None
+        profile = args.profile or "canonical"
+        local_model = args.local_model or DEFAULT_LOCAL_MODEL
+
+        if use_interactive:
+            target_agents, profile, local_model = _render_tui_wizard(
+                ctx,
+                initial_agents=target_agents,
+                initial_profile=args.profile,
+                initial_model=local_model,
+            )
+        elif target_agents is None:
+            target_agents = normalize_remediation_harnesses("all", repo_root=ctx.repo_root)
+
+        orch = RemediationOrchestrator(
+            ctx,
+            harnesses=target_agents,
+            profile=profile,
+            local_model=local_model,
+            offline=bool(args.offline),
+            quiesce=bool(args.quiesce),
+            resume=bool(args.resume),
+            from_backup=args.from_backup,
+            project_dir=args.project,
+            progress_callback=_make_progress_printer(enabled=not as_json),
+        )
+        res = orch.run()
+        if as_json:
+            sys.stdout.write(json.dumps(res, indent=2, ensure_ascii=False) + "\n")
+        else:
+            _emit_human_summary(res)
+        return 0 if res.get("ok") else 1
+
+    except Exception as exc:
+        err = {"ok": False, "error": str(exc)}
+        if as_json:
+            sys.stdout.write(json.dumps(err, indent=2, ensure_ascii=False) + "\n")
+        else:
+            sys.stderr.write(f"agentcfg-remediate error: {exc}\n")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

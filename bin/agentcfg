@@ -20,6 +20,12 @@ from lib.failsafe import failsafe_apply, failsafe_exec, failsafe_restore
 from lib.monitor import doctor, upstream_check, watch_updates
 from lib.paths import RuntimeContext
 from lib.policy import validate_repo
+from lib.remediate import (
+    DEFAULT_LOCAL_MODEL,
+    VALID_PROFILES,
+    RemediationOrchestrator,
+    get_remediation_status,
+)
 
 
 def _emit(payload: dict[str, Any], as_json: bool) -> None:
@@ -126,12 +132,55 @@ def build_parser() -> argparse.ArgumentParser:
     p_cleanse = sub.add_parser("cleanse", help="Quarantine corrupt configs, stale runtime artifacts, or poisoned memory")
     _add_common_flags(p_cleanse, suppress_defaults=True)
     p_cleanse.add_argument("--scope", choices=["config", "memory", "runtime", "all"], default="config")
+    p_cleanse.add_argument(
+        "--harness",
+        "-H",
+        action="append",
+        dest="harnesses",
+        default=None,
+        help="Restrict cleanse to specific harness(es) (repeatable or comma-separated)",
+    )
     p_cleanse.add_argument("--dry-run", action="store_true", help="Report findings without moving or editing files")
     p_cleanse.add_argument("--auto-quarantine", action="store_true", help="Quarantine detected issues (default unless --dry-run)")
     p_cleanse.add_argument("--include-auth", action="store_true", help="Allow auth file wipe (requires --confirm-wipe-auth)")
     p_cleanse.add_argument("--confirm-wipe-auth", action="store_true", help="Confirm auth file wipe")
     p_cleanse.add_argument("--no-restore-targets", action="store_true", help="Do not re-render quarantined SoT config targets")
     p_cleanse.add_argument("--native-wipe", action="store_true", help="Invoke native memory reset commands in memory scope")
+
+    for sub_name, sub_help in (
+        ("remediate", "Run 8-stage crash-journaled hostile-environment remediation pipeline"),
+        ("onboard", "Onboard an agent under hostile/corrupted/offline conditions via 8-stage pipeline"),
+    ):
+        p_rem = sub.add_parser(sub_name, help=sub_help)
+        _add_common_flags(p_rem, suppress_defaults=True)
+        p_rem.add_argument(
+            "--harness",
+            "-H",
+            "--agent",
+            action="append",
+            dest="harnesses",
+            default=None,
+            help="Target harness/agent name or 'all' (repeatable or comma-separated)",
+        )
+        p_rem.add_argument(
+            "--profile",
+            choices=list(VALID_PROFILES),
+            default="canonical",
+            help="Deployment profile (canonical, failsafe, or local-gemma)",
+        )
+        p_rem.add_argument(
+            "--local-model",
+            dest="local_model",
+            default=DEFAULT_LOCAL_MODEL,
+            help=f"Local Gemma/Ollama model identifier (default: {DEFAULT_LOCAL_MODEL})",
+        )
+        p_rem.add_argument("--offline", action="store_true", default=True, help="Operate in airgapped/offline mode")
+        p_rem.add_argument("--from-backup", dest="from_backup", default=None, help="Recover SoT repo from backup .bundle")
+        p_rem.add_argument("--quiesce", action="store_true", default=False, help="Send SIGTERM to non-ancestor agent processes")
+        p_rem.add_argument("--resume", action="store_true", default=False, help="Resume from remediation-journal.json")
+        p_rem.add_argument("--status", action="store_true", default=False, help="Inspect remediation journal and receipts")
+        p_rem.add_argument("--interactive", action="store_true", default=False, help="Run interactive wizard")
+        p_rem.add_argument("--non-interactive", action="store_true", default=False, help="Run non-interactively")
 
     p_fs = sub.add_parser("failsafe", help="Switch to persistent failsafe profile or launch ephemeral safe session")
     _add_common_flags(p_fs, suppress_defaults=True)
@@ -241,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
             res = run_cleanse(
                 ctx,
                 scope=args.scope,
+                apply=not args.dry_run and auto_q,
+                harnesses=_parse_harnesses(args.harnesses),
                 dry_run=args.dry_run,
                 auto_quarantine=auto_q,
                 include_auth=args.include_auth,
@@ -250,6 +301,26 @@ def main(argv: list[str] | None = None) -> int:
             )
             _emit(res, as_json)
             return 0
+
+        if cmd in ("remediate", "onboard"):
+            if args.status:
+                st = get_remediation_status(ctx)
+                _emit(st, as_json)
+                return 0
+            orch = RemediationOrchestrator(
+                ctx,
+                harnesses=_parse_harnesses(args.harnesses),
+                profile=args.profile,
+                local_model=args.local_model,
+                offline=bool(args.offline),
+                quiesce=bool(args.quiesce),
+                resume=bool(args.resume),
+                from_backup=args.from_backup,
+                project_dir=getattr(args, "project", None),
+            )
+            res = orch.run()
+            _emit(res, as_json)
+            return 0 if res.get("ok") else 1
 
         if cmd == "failsafe":
             if args.apply:

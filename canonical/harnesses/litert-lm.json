@@ -1,0 +1,54 @@
+{
+  "harness": "litert-lm",
+  "mcp_schema": "none",
+  "mcp_format": "none",
+  "http_transport_style": "none",
+  "env_syntax": "none",
+  "supports_sse": false,
+  "rules_target": null,
+  "home_env_var": "LITERT_LM_HOME",
+  "failsafe_flags": [
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8080",
+    "--no-telemetry"
+  ],
+  "base_settings": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "telemetry": false,
+    "default_model": "gemma-4-E4B-it",
+    "model": "gemma-4-E4B-it",
+    "tool_router": "functiongemma-270m-it",
+    "tool_router_model": "functiongemma-270m-it",
+    "safety_classifier": "shieldgemma-2-4b-it",
+    "safety_classifier_model": "shieldgemma-2-4b-it",
+    "max_context_tokens": 32768,
+    "allow_remote": false
+  },
+  "supported_models": [
+    "gemma-4-E2B-it",
+    "gemma-4-E4B-it",
+    "gemma-4-26B-A4B-it",
+    "gemma-4-31B-it",
+    "gemma-3-4b-it",
+    "gemma-3n-E4B-it",
+    "functiongemma-270m-it",
+    "shieldgemma-2-4b-it"
+  ],
+  "managed_keys": [
+    "host",
+    "port",
+    "telemetry",
+    "default_model",
+    "model",
+    "tool_router",
+    "tool_router_model",
+    "safety_classifier",
+    "safety_classifier_model",
+    "max_context_tokens",
+    "allow_remote"
+  ],
+  "removed_keys": []
+}

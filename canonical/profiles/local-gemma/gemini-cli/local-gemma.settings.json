@@ -1,0 +1,26 @@
+{
+  "general": {
+    "defaultApprovalMode": "plan",
+    "enableAutoUpdate": false
+  },
+  "security": {
+    "folderTrust": {
+      "enabled": true
+    },
+    "disableYoloMode": true
+  },
+  "experimental": {
+    "autoMemory": false,
+    "gemma": {
+      "enabled": true,
+      "runtime": "litert-lm",
+      "endpoint": "http://127.0.0.1:8080",
+      "base_url": "http://127.0.0.1:8080",
+      "model": "gemma-4-E4B-it",
+      "routerModel": "functiongemma-270m-it",
+      "tool_router": "functiongemma-270m-it",
+      "safetyClassifier": "shieldgemma-2-4b-it"
+    }
+  },
+  "mcpServers": {}
+}
