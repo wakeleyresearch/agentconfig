@@ -172,14 +172,14 @@ python3 bin/agentcfg doctor
 # 2. Validate policy rules, schemas, byte budgets, and secret scans
 python3 bin/agentcfg validate [--staged] [--skip-agy] [--no-check-grok]
 
-# 3. Preview unified diffs against live targets (or against canonical failsafe baseline)
-python3 bin/agentcfg diff [--failsafe]
+# 3. Preview unified diffs against live targets (all harnesses, or filtered via --harness)
+python3 bin/agentcfg diff [--failsafe] [--harness HARNESS]...
 
 # 4. Atomically render and deploy targets (optionally quarantine corrupt state first)
-python3 bin/agentcfg apply [--safe] [--approve-drift]
+python3 bin/agentcfg apply [--safe] [--approve-drift] [--harness HARNESS]...
 
 # 5. Verify live targets against ~/.local/state/agentcfg/deployed-manifest.json
-python3 bin/agentcfg verify
+python3 bin/agentcfg verify [--harness HARNESS]...
 
 # 6. Restore targets from a recorded snapshot under state_dir/snapshots/
 python3 bin/agentcfg restore [--snapshot SNAPSHOT]
@@ -190,7 +190,7 @@ python3 bin/agentcfg cleanse [--scope {config,memory,runtime,all}] [--dry-run] \
   [--no-restore-targets] [--native-wipe]
 
 # 8. Switch live targets to/from failsafe or launch an isolated ephemeral failsafe session
-python3 bin/agentcfg failsafe (--apply | --restore | --exec EXEC_HARNESS) [harness_args...]
+python3 bin/agentcfg failsafe (--apply | --restore | --exec EXEC_HARNESS) [--harness HARNESS]... [harness_args...]
 
 # 9. Pre-trust read-only audit of an unfamiliar repository before opening an agent
 python3 bin/agentcfg audit-repo [--strict] <path>

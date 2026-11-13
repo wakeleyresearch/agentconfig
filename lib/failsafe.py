@@ -12,9 +12,23 @@ from .formats import FormatError, dump_json, parse_json
 from .paths import RuntimeContext, atomic_write_text
 
 
-def failsafe_apply(ctx: RuntimeContext) -> dict[str, Any]:
+def failsafe_apply(
+    ctx: RuntimeContext,
+    harnesses: set[str] | list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
     """Snapshot live configs/memory and atomically swap deployed targets to failsafe baselines."""
-    res = apply_targets(ctx, safe=True, approve_drift=True, failsafe=True)
+    only_ids: set[str] | None = None
+    manifest_path = ctx.state_dir / "deployed-manifest.json"
+    if not harnesses and manifest_path.exists():
+        try:
+            doc = parse_json(manifest_path.read_text(encoding="utf-8"))
+            ids = {str(k) for k in (doc.get("targets") or {}).keys()}
+            if ids:
+                only_ids = ids
+        except (FormatError, OSError):
+            only_ids = None
+
+    res = apply_targets(ctx, safe=True, approve_drift=True, failsafe=True, harnesses=harnesses, only_ids=only_ids)
     state_file = ctx.state_dir / "failsafe-state.json"
     state_obj = {
         "active": True,

@@ -14,7 +14,15 @@ from pathlib import Path
 from typing import Any
 
 from .formats import FormatError, dump_json, parse_by_format, parse_json
-from .paths import RuntimeContext, atomic_write_bytes, atomic_write_text, file_mode, sha256_bytes, sha256_file
+from .paths import (
+    RuntimeContext,
+    atomic_write_bytes,
+    atomic_write_text,
+    ensure_safe_dir,
+    file_mode,
+    sha256_bytes,
+    sha256_file,
+)
 from .policy import (
     check_codex_config,
     check_hooks_config,
@@ -342,9 +350,8 @@ class QuarantineSession:
         if self.dry_run:
             return True
 
-        os.makedirs(self.quarantine_dir, mode=0o700, exist_ok=True)
-        os.chmod(self.quarantine_dir, 0o700)
-        os.makedirs(dest.parent, mode=0o700, exist_ok=True)
+        ensure_safe_dir(self.quarantine_dir, mode=0o700, boundary_root=self.ctx.state_dir)
+        ensure_safe_dir(dest.parent, mode=0o700, boundary_root=self.ctx.state_dir)
 
         if is_symlink:
             link_target = os.readlink(src)
@@ -383,16 +390,14 @@ class QuarantineSession:
         }
         self.entries.append(entry)
         if not self.dry_run:
-            os.makedirs(self.quarantine_dir, mode=0o700, exist_ok=True)
-            os.chmod(self.quarantine_dir, 0o700)
+            ensure_safe_dir(self.quarantine_dir, mode=0o700, boundary_root=self.ctx.state_dir)
             atomic_write_bytes(dest, payload, mode=0o400, boundary_root=self.quarantine_dir)
 
     def finalize(self) -> Path | None:
         """Write quarantine-manifest.json if any quarantine actions occurred."""
         if self.dry_run or not self.entries:
             return None
-        os.makedirs(self.quarantine_dir, mode=0o700, exist_ok=True)
-        os.chmod(self.quarantine_dir, 0o700)
+        ensure_safe_dir(self.quarantine_dir, mode=0o700, boundary_root=self.ctx.state_dir)
         manifest = {
             "schema_version": "1.0",
             "scope": self.scope,
@@ -617,8 +622,7 @@ def _snapshot_memory_files(
     if not files:
         return None
     snap_dir = ctx.state_dir / "memory-snapshots" / _utc_stamp()
-    os.makedirs(snap_dir, mode=0o700, exist_ok=True)
-    os.chmod(snap_dir, 0o700)
+    ensure_safe_dir(snap_dir, mode=0o700, boundary_root=ctx.state_dir)
     abs_home = Path(os.path.abspath(ctx.home_dir))
     manifest_entries: list[dict[str, str]] = []
     for f in files:

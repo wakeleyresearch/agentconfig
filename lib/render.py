@@ -22,6 +22,7 @@ from .paths import RuntimeContext
 
 
 _HARNESS_ALIASES: dict[str, str] = {
+    "agy": "antigravity",
     "gemini-cli": "gemini",
     "claude-code": "claude",
     "kimi-code": "kimi",

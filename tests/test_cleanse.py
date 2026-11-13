@@ -107,6 +107,8 @@ class CleanseTests(IsolatedEnvMixin, unittest.TestCase):
         self.assertTrue(manifest_path.is_file())
         self.assertEqual(file_mode(manifest_path), 0o600)
         self.assertEqual(file_mode(manifest_path.parent), 0o700)
+        self.assertEqual(file_mode(manifest_path.parent.parent), 0o700)
+        self.assertEqual(file_mode(Path(res["quarantined"][0]["quarantine_path"]).parent), 0o700)
 
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         entries = manifest["entries"]

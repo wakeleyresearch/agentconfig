@@ -345,6 +345,84 @@ class DeployApplyVerifyRestoreTests(IsolatedEnvMixin, unittest.TestCase):
         self.assertEqual(codex_cfg["approval_policy"], "on-request")
         self.assertEqual(run_agentcfg("verify", "--json", home=self.home_dir, state_dir=self.state_dir).returncode, 0)
 
+    def test_harness_filter_selective_apply_diff_verify_and_manifest_merge(self) -> None:
+        self._seed_existing_configs()
+
+        diff_proc = run_agentcfg(
+            "diff",
+            "--harness",
+            "antigravity",
+            "--json",
+            home=self.home_dir,
+            state_dir=self.state_dir,
+        )
+        self.assertEqual(diff_proc.returncode, 0, msg=diff_proc.stderr)
+        diff_ids = {d["id"] for d in json.loads(diff_proc.stdout)["diffs"]}
+        self.assertEqual(
+            diff_ids,
+            {
+                "agents-global-rules",
+                "agents-global-skills",
+                "antigravity-plugin-bundle",
+                "antigravity-cli-settings",
+            },
+        )
+
+        app1 = run_agentcfg(
+            "apply",
+            "--safe",
+            "--harness",
+            "agy",
+            "--json",
+            home=self.home_dir,
+            state_dir=self.state_dir,
+        )
+        self.assertEqual(app1.returncode, 0, msg=app1.stdout + app1.stderr)
+        res1 = json.loads(app1.stdout)
+        self.assertEqual(
+            set(res1["applied_ids"]),
+            {
+                "agents-global-rules",
+                "agents-global-skills",
+                "antigravity-plugin-bundle",
+                "antigravity-cli-settings",
+            },
+        )
+        self.assertTrue((self.home_dir / ".agents" / "AGENTS.md").is_file())
+        self.assertFalse((self.home_dir / ".codex" / "AGENTS.md").exists())
+        self.assertFalse((self.home_dir / ".claude" / "CLAUDE.md").exists())
+
+        # failsafe --apply without --harness only swaps targets recorded in deployed-manifest.json.
+        fs_proc = run_agentcfg("failsafe", "--apply", "--json", home=self.home_dir, state_dir=self.state_dir)
+        self.assertEqual(fs_proc.returncode, 0, msg=fs_proc.stdout + fs_proc.stderr)
+        self.assertFalse((self.home_dir / ".codex" / "AGENTS.md").exists())
+        agy_fs = json.loads((self.home_dir / ".gemini" / "antigravity-cli" / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(agy_fs["agentMode"], "plan")
+        self.assertEqual(run_agentcfg("failsafe", "--restore", "--json", home=self.home_dir, state_dir=self.state_dir).returncode, 0)
+
+        # Follow-up selective apply for claude merges cleanly with existing antigravity targets.
+        app2 = run_agentcfg(
+            "apply",
+            "--harness",
+            "claude",
+            "--json",
+            home=self.home_dir,
+            state_dir=self.state_dir,
+        )
+        self.assertEqual(app2.returncode, 0, msg=app2.stdout + app2.stderr)
+        manifest = json.loads((self.state_dir / "deployed-manifest.json").read_text(encoding="utf-8"))
+        self.assertIn("agents-global-rules", manifest["targets"])
+        self.assertIn("claude-code-settings", manifest["targets"])
+        self.assertNotIn("codex-config", manifest["targets"])
+
+        v_all = run_agentcfg("verify", "--json", home=self.home_dir, state_dir=self.state_dir)
+        self.assertEqual(v_all.returncode, 0, msg=v_all.stdout)
+        v_res = json.loads(v_all.stdout)
+        self.assertEqual(v_res["checked"], 7)
+
+        bad_h = run_agentcfg("diff", "--harness", "nonexistent-harness", "--json", home=self.home_dir, state_dir=self.state_dir)
+        self.assertNotEqual(bad_h.returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

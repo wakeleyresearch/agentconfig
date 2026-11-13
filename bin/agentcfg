@@ -89,14 +89,35 @@ def build_parser() -> argparse.ArgumentParser:
     p_diff = sub.add_parser("diff", help="Render in-memory and show unified diffs against live targets")
     _add_common_flags(p_diff, suppress_defaults=True)
     p_diff.add_argument("--failsafe", action="store_true", help="Diff against failsafe profile")
+    p_diff.add_argument(
+        "--harness",
+        action="append",
+        dest="harnesses",
+        default=None,
+        help="Restrict to specific harness(es) (repeatable or comma-separated)",
+    )
 
     p_apply = sub.add_parser("apply", help="Atomically render and deploy targets")
     _add_common_flags(p_apply, suppress_defaults=True)
     p_apply.add_argument("--safe", action="store_true", help="Run pre-apply cleanse auto-quarantine")
     p_apply.add_argument("--approve-drift", action="store_true", help="Proceed despite watch-updates drift")
+    p_apply.add_argument(
+        "--harness",
+        action="append",
+        dest="harnesses",
+        default=None,
+        help="Restrict apply to specific harness(es) (repeatable or comma-separated)",
+    )
 
     p_verify = sub.add_parser("verify", help="Verify live targets against deployed-manifest.json")
     _add_common_flags(p_verify, suppress_defaults=True)
+    p_verify.add_argument(
+        "--harness",
+        action="append",
+        dest="harnesses",
+        default=None,
+        help="Restrict verify to specific deployed harness(es) (repeatable or comma-separated)",
+    )
 
     p_restore = sub.add_parser("restore", help="Restore targets from a snapshot")
     _add_common_flags(p_restore, suppress_defaults=True)
@@ -114,6 +135,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_fs = sub.add_parser("failsafe", help="Switch to persistent failsafe profile or launch ephemeral safe session")
     _add_common_flags(p_fs, suppress_defaults=True)
+    p_fs.add_argument(
+        "--harness",
+        action="append",
+        dest="harnesses",
+        default=None,
+        help="Restrict --apply to specific harness(es) (repeatable or comma-separated)",
+    )
     fs_group = p_fs.add_mutually_exclusive_group(required=True)
     fs_group.add_argument("--apply", action="store_true", help="Atomically swap targets to failsafe profile")
     fs_group.add_argument("--restore", action="store_true", help="Restore targets from pre-failsafe snapshot")
@@ -140,6 +168,18 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common_flags(p_doc, suppress_defaults=True)
 
     return parser
+
+
+def _parse_harnesses(raw: list[str] | None) -> set[str] | None:
+    if not raw:
+        return None
+    out: set[str] = set()
+    for entry in raw:
+        for part in str(entry).split(","):
+            s = part.strip()
+            if s:
+                out.add(s)
+    return out or None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -169,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if rep.ok else 1
 
         if cmd == "diff":
-            res = diff_targets(ctx, failsafe=args.failsafe)
+            res = diff_targets(ctx, failsafe=args.failsafe, harnesses=_parse_harnesses(args.harnesses))
             _emit(res, as_json)
             return 0
 
@@ -179,12 +219,13 @@ def main(argv: list[str] | None = None) -> int:
                 safe=args.safe,
                 approve_drift=args.approve_drift,
                 failsafe=False,
+                harnesses=_parse_harnesses(args.harnesses),
             )
             _emit(res, as_json)
             return 0
 
         if cmd == "verify":
-            res = verify_deployed(ctx)
+            res = verify_deployed(ctx, harnesses=_parse_harnesses(args.harnesses))
             _emit(res, as_json)
             return 0 if res.get("ok") else 1
 
@@ -212,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if cmd == "failsafe":
             if args.apply:
-                res = failsafe_apply(ctx)
+                res = failsafe_apply(ctx, harnesses=_parse_harnesses(args.harnesses))
                 _emit(res, as_json)
                 return 0
             if args.restore:

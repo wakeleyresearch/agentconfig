@@ -209,13 +209,34 @@ def _resolve_grok_flavor(targets: list[dict[str, Any]], ctx: RuntimeContext) -> 
     return next(iter(flavors_in_catalog), None)
 
 
+def _normalize_harness_filter(
+    all_targets: list[dict[str, Any]],
+    harnesses: set[str] | list[str] | tuple[str, ...] | None,
+) -> set[str] | None:
+    """Normalize and validate an optional harness filter set."""
+    if not harnesses:
+        return None
+    norm = {normalize_harness(str(h)) for h in harnesses if str(h).strip()}
+    if not norm:
+        return None
+    known = {normalize_harness(str(t.get("harness", ""))) for t in all_targets}
+    unknown = sorted(norm - known)
+    if unknown:
+        raise ValueError(f"Unknown harness(es) {unknown}; choose from {sorted(known)}")
+    return norm
+
+
 def _filter_active_targets(
     targets: list[dict[str, Any]],
     ctx: RuntimeContext,
     only_target_paths: set[str] | None = None,
+    harnesses: set[str] | list[str] | tuple[str, ...] | None = None,
+    only_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     active_list: list[dict[str, Any]] = []
-    eff_flavor = _resolve_grok_flavor(targets, ctx)
+    norm_harnesses = _normalize_harness_filter(targets, harnesses)
+    grok_needed = norm_harnesses is None or "grok" in norm_harnesses
+    eff_flavor = _resolve_grok_flavor(targets, ctx) if grok_needed else ctx.grok_flavor
 
     for t in targets:
         if not t.get("enabled", True):
@@ -223,7 +244,12 @@ def _filter_active_targets(
         scope = t.get("scope", "global")
         if scope == "project" and ctx.project_dir is None:
             continue
-        if normalize_harness(str(t.get("harness", ""))) == "grok":
+        t_harness = normalize_harness(str(t.get("harness", "")))
+        if norm_harnesses is not None and t_harness not in norm_harnesses:
+            continue
+        if only_ids is not None and str(t.get("id", "")) not in only_ids:
+            continue
+        if t_harness == "grok":
             t_flavor = t.get("grok_flavor")
             if eff_flavor is not None and t_flavor is not None and t_flavor != eff_flavor:
                 continue
@@ -454,6 +480,8 @@ def apply_targets(
     approve_drift: bool = False,
     failsafe: bool = False,
     only_target_paths: set[str] | None = None,
+    harnesses: set[str] | list[str] | tuple[str, ...] | None = None,
+    only_ids: set[str] | None = None,
     run_pre_cleanse: bool = True,
 ) -> dict[str, Any]:
     """Safely validate, snapshot, render, deploy, exclude, and verify targets."""
@@ -466,7 +494,13 @@ def apply_targets(
             raise RuntimeError(f"Git HEAD signature verification failed: {sig_msg}")
 
         all_targets = load_targets_manifest(ctx.repo_root)
-        active_targets = _filter_active_targets(all_targets, ctx, only_target_paths=only_target_paths)
+        active_targets = _filter_active_targets(
+            all_targets,
+            ctx,
+            only_target_paths=only_target_paths,
+            harnesses=harnesses,
+            only_ids=only_ids,
+        )
 
         if not approve_drift:
             drift = watch_updates(ctx, update_baseline=False, fast=True)
@@ -474,12 +508,13 @@ def apply_targets(
                 reasons = "; ".join(e.get("detail", e.get("type", "drift")) for e in drift.get("events", []) if e.get("severity") == "error")
                 raise RuntimeError(f"watch-updates drift gate blocked apply: {reasons}")
 
-        eff_flavor = _resolve_grok_flavor(all_targets, ctx)
+        need_grok = any(normalize_harness(str(t.get("harness", ""))) == "grok" for t in active_targets)
+        eff_flavor = _resolve_grok_flavor(active_targets, ctx) if need_grok else ctx.grok_flavor
         val_report = validate_repo(
             ctx,
             staged=False,
             run_agy=False,
-            check_grok_home=(ctx.grok_flavor is None and eff_flavor is None),
+            check_grok_home=(ctx.grok_flavor is None and eff_flavor is None and need_grok),
         )
         if not val_report.ok:
             errs = "; ".join(f"{e.path}: {e.message}" for e in val_report.errors[:5])
@@ -498,11 +533,14 @@ def apply_targets(
         snap_dir = create_snapshot(ctx, active_targets, label="failsafe" if failsafe else "apply")
 
         manifest_path = ctx.state_dir / "deployed-manifest.json"
+        partial = only_target_paths is not None or bool(harnesses) or only_ids is not None
         deployed_map: dict[str, Any] = {}
-        if only_target_paths is not None and manifest_path.exists():
+        old_grok_flavor: str | None = None
+        if partial and manifest_path.exists():
             try:
                 old_manifest = parse_json(manifest_path.read_text(encoding="utf-8"))
                 deployed_map = dict(old_manifest.get("targets") or {})
+                old_grok_flavor = old_manifest.get("grok_flavor")
             except (FormatError, OSError):
                 deployed_map = {}
 
@@ -521,7 +559,7 @@ def apply_targets(
                 "deployed_at": datetime.now(timezone.utc).isoformat(),
                 "git_head": _git_head_sha(ctx.repo_root),
                 "failsafe": failsafe,
-                "grok_flavor": _resolve_grok_flavor(all_targets, ctx),
+                "grok_flavor": eff_flavor or old_grok_flavor,
                 "home_dir": str(ctx.home_dir),
                 "targets": deployed_map,
             }
@@ -532,7 +570,7 @@ def apply_targets(
                 boundary_root=ctx.state_dir,
             )
 
-            v_res = verify_deployed(ctx, only_ids=set(applied_ids) if only_target_paths else None)
+            v_res = verify_deployed(ctx, only_ids=set(applied_ids) if partial else None)
             if not v_res["ok"]:
                 raise RuntimeError(f"Post-apply verification failed: {v_res['issues']}")
         except Exception:
@@ -550,7 +588,11 @@ def apply_targets(
         }
 
 
-def verify_deployed(ctx: RuntimeContext, only_ids: set[str] | None = None) -> dict[str, Any]:
+def verify_deployed(
+    ctx: RuntimeContext,
+    only_ids: set[str] | None = None,
+    harnesses: set[str] | list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
     """Verify SHA-256 hashes (full or managed subtree) and POSIX permissions against deployed-manifest.json."""
     manifest_path = ctx.state_dir / "deployed-manifest.json"
     if not manifest_path.exists():
@@ -558,6 +600,7 @@ def verify_deployed(ctx: RuntimeContext, only_ids: set[str] | None = None) -> di
 
     doc = parse_json(manifest_path.read_text(encoding="utf-8"))
     targets = doc.get("targets", {})
+    norm_harnesses = {normalize_harness(str(h)) for h in harnesses if str(h).strip()} if harnesses else None
     issues: list[dict[str, str]] = []
     checked = 0
 
@@ -565,6 +608,8 @@ def verify_deployed(ctx: RuntimeContext, only_ids: set[str] | None = None) -> di
         if only_ids is not None and tid not in only_ids:
             continue
         if not isinstance(rec, dict):
+            continue
+        if norm_harnesses is not None and normalize_harness(str(rec.get("harness", ""))) not in norm_harnesses:
             continue
         checked += 1
         dest = Path(rec["path"])
@@ -651,10 +696,14 @@ def verify_deployed(ctx: RuntimeContext, only_ids: set[str] | None = None) -> di
     }
 
 
-def diff_targets(ctx: RuntimeContext, failsafe: bool = False) -> dict[str, Any]:
+def diff_targets(
+    ctx: RuntimeContext,
+    failsafe: bool = False,
+    harnesses: set[str] | list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
     """Render targets in memory and return unified diffs against live paths."""
     all_targets = load_targets_manifest(ctx.repo_root)
-    active = _filter_active_targets(all_targets, ctx)
+    active = _filter_active_targets(all_targets, ctx, harnesses=harnesses)
     diffs: list[dict[str, Any]] = []
 
     for t in active:
