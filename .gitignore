@@ -8,9 +8,28 @@ keys.txt
 *.pem
 *.p12
 *.pfx
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+id_ecdsa
+id_ecdsa.*
+id_dsa
+id_dsa.*
+agentconfig_signing*
 .env
 .env.*
 !.env.example
+
+# Default-deny inside secrets/ (allow only .sops.yaml, README.md, and *.enc.*)
+secrets/*
+!secrets/.sops.yaml
+!secrets/README.md
+!secrets/*.enc.yaml
+!secrets/*.enc.yml
+!secrets/*.enc.json
+!secrets/*.enc.env
+!secrets/*.enc.ini
 
 # Native harness auth / credential / history / memory runtime files
 auth.json
@@ -21,6 +40,12 @@ hosts.yml
 history.jsonl
 mcp_credentials.json
 google_accounts.json
+secrets.yaml
+providers.json
+credentials/
+ccd-session-secrets/
+plugin-mcp-auth/
+keyrings/
 
 # Runtime state, backups, build & temp artifacts
 dist/
